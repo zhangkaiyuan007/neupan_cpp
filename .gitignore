@@ -1,0 +1,36 @@
+# ---- Build / install artifacts ----
+# colcon (run at repo root) and any stray cmake build trees
+/build/
+/install/
+/log/
+build/
+build_test/
+
+# ---- CMake ----
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+*.cmake.user
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# ---- ROS ----
+*.bag
+*.db3
+
+# NOTE: models/*.bin and libneupan/tests/data/*.nptf are intentionally
+# tracked -- they are required to run the demo and the unit tests.
