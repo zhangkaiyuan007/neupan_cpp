@@ -6,6 +6,8 @@
 不依赖 cvxpy**,因此能塞进 NUC 且与机器人其余的自治栈共存。它包含一个独立核心库
 (`libneupan`)和一个 ROS 2 节点(`neupan_cpp_ros`)。
 
+<video src="neupan_cpp.mp4" width="100%" controls></video>
+
 > 差速 (矩形机器人 + 全局路径参考) 已实现并在仿真中验证。
 > 接下来将首先完成全向适配。见 [项目状态与路线图](#项目状态与路线图)。
 
