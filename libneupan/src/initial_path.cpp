@@ -109,10 +109,7 @@ void InitialPath::setInitialPath(std::vector<PathPoint> path) {
   if (path.size() < 2)
     throw std::invalid_argument(
         "initial_path: an external path needs at least 2 points");
-  // Densify the (possibly sparse, e.g. Douglas-Peucker-simplified) external
-  // path to interval_, exactly like generateLineCurve. A sparse curve leaves
-  // the MPC reference too coarse near the goal -- the reference extrapolates
-  // past the final waypoint and the robot overshoots instead of stopping.
+  // Densify the external path to interval_, exactly like generateLineCurve. 
   std::vector<Vec3> waypoints;
   waypoints.reserve(path.size());
   for (const auto& p : path) waypoints.emplace_back(p.head<3>());

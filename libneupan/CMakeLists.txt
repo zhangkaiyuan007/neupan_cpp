@@ -16,11 +16,6 @@ find_package(OsqpEigen REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
 if(NEUPAN_NATIVE)
-  # NOTE: only safe when osqp-eigen itself is built with the same flags;
-  # against a stock (non-native) libOsqpEigen the Eigen members inside
-  # OsqpEigen::Solver get a different ABI and the solver crashes on
-  # destruction. Will be enforced automatically once dependencies are
-  # vendored via FetchContent.
   message(WARNING "NEUPAN_NATIVE requires an osqp-eigen built with the same "
                   "-march flags; use with care.")
   add_compile_options(-march=native -mtune=native)
@@ -77,8 +72,6 @@ install(EXPORT neupanTargets
   NAMESPACE neupan::
   DESTINATION lib/cmake/libneupan)
 
-# libneupan is a plain-CMake package, so colcon does not add it to
-# AMENT_PREFIX_PATH and ROS get_package_share_directory cannot find it.
 # Export the installed models directory so dependents (e.g. neupan_cpp_ros)
 # can vendor the DUNE model into their own share.
 include(CMakePackageConfigHelpers)

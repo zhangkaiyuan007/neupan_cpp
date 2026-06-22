@@ -18,7 +18,7 @@
 namespace neupan {
 
 namespace {
-// OSQP's "infinity": real inf in the bounds makes the v1.0 duality-gap
+// real inf in the bounds makes the v1.0 duality-gap
 // termination check produce NaN and the solver never reports Solved.
 constexpr double kInf = OSQP_INFTY;
 }
@@ -226,10 +226,6 @@ NRMP::Result NRMP::solve(const Mat3X& nom_s, const Mat2X& nom_u,
       throw std::runtime_error("nrmp: OSQP init failed");
     initialized_ = true;
   } else {
-    // P depends only on the (fixed) params; A changes every call but with a
-    // constant sparsity pattern, so push all values straight into OSQP.
-    // osqp-eigen's updateLinearConstraintsMatrix diffs against a stale copy
-    // of A and corrupts entries that return to their initial values.
     if (osqp_update_data_mat(solver_->solver().get(), nullptr, nullptr, 0,
                              A_.valuePtr(), nullptr, A_.nonZeros()) != 0 ||
         !solver_->updateGradient(q_) || !solver_->updateBounds(lb_, ub_))

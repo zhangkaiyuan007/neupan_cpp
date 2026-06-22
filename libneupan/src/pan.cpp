@@ -112,9 +112,8 @@ PAN::Output PAN::forward(Mat3X nom_s, Mat2X nom_u, const Mat3X& ref_s,
                          const Vec& ref_us, const Mat2X& points) {
   Output out;
   out.min_distance = std::numeric_limits<double>::infinity();
-  // Bounded fallback: the nominal reference controls. If the very first NRMP
-  // solve fails to converge we keep these rather than propagating a garbage
-  // (constraint-violating) iterate from OSQP.
+  // If the very first NRMP solve fails to converge we keep these 
+  // rather than propagating a garbage iterate from OSQP.
   out.opt_s = nom_s;
   out.opt_u = nom_u;
 
@@ -141,8 +140,7 @@ PAN::Output PAN::forward(Mat3X nom_s, Mat2X nom_u, const Mat3X& ref_s,
         nrmp_.solve(nom_s, nom_u, ref_s, ref_us, fa_list, fb_list);
 
     // A non-converged OSQP solve can return a point that violates the hard
-    // speed/acceleration box; never propagate it. Keep the last accepted plan
-    // (or the nominal fallback on the first iteration) instead.
+    // speed/acceleration box. Keep the last accepted plan instead.
     if (!res.success) break;
 
     nom_s = res.s;

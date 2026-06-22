@@ -146,9 +146,7 @@ Vec2 NeuPANPlanner::forward(const Vec3& state, const Mat2X& points,
     return Vec2::Zero();
   }
 
-  // Safety net: the speed box |u| <= max_speed is a hard NRMP constraint, so
-  // this is a no-op on a converged solve; it only bounds a command that a
-  // degraded solve might otherwise let slip through to the robot.
+  // it only bounds a command that a degraded solve might otherwise let slip through to the robot.
   return out.opt_u.col(0)
       .cwiseMax(-robot_.max_speed)
       .cwiseMin(robot_.max_speed);
