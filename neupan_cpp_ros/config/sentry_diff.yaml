@@ -1,19 +1,10 @@
-# neupan_cpp planner config for the 2026_sentry diff-drive robot.
-#
-# Robot footprint matches base_link in agv_bringup (0.5 x 0.5 box). The DUNE
-# model (diff_sentry.bin) MUST be trained for these exact dimensions, else the
-# predicted obstacle distances are wrong. The ROS node's `dune_checkpoint`
-# parameter overrides the value below.
-
 # mpc
 receding: 10
 step_time: 0.1
 ref_speed: 1.0
-# Hard safety stop: zero velocity when the nearest obstacle point is within
-# this distance of the robot body. Lower = more aggressive (stops later).
 collision_threshold: 0.05
 
-# robot (0.5 x 0.5 square, diff drive)
+# robot
 robot:
   kinematics: 'diff'
   max_speed: [2.0, 1.5]
@@ -22,10 +13,6 @@ robot:
   width: 0.5
 
 # initial path
-#
-# No waypoints: Level-0 test drives a straight line from the current pose to
-# the RViz 2D Nav Goal (remapped to /neupan_goal). For path tracking instead,
-# publish a nav_msgs/Path on /initial_path.
 ipath:
   curve_style: 'line'
   loop: False
@@ -34,19 +21,13 @@ ipath:
   ind_range: 10
   arrive_index_threshold: 1
 
-# proximal alternating minimization network
 pan:
   iter_num: 2
   dune_max_num: 100
   nrmp_max_num: 10
   iter_threshold: 0.1
-  dune_checkpoint: 'diff_sentry.bin'
 
 # adjust parameters
-#   d_max: largest keep-out distance the planner tries to maintain from
-#          obstacles. Too large for a small robot makes it stall in tight
-#          spaces ("won't go"). Smaller = passes closer / more aggressive.
-#   d_min: minimum keep-out floor. eta: how strongly it wants clearance.
 adjust:
   q_s: 1.0
   p_u: 1.0
