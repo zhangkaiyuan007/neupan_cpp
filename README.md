@@ -9,18 +9,21 @@
 > 差速 (矩形机器人 + 全局路径参考) 已实现并在仿真中验证。
 > 接下来将首先完成全向适配。见 [项目状态与路线图](#项目状态与路线图)。
 
----
+<p align="center">
+  <a href="https://b23.tv/tUGI5hV">
+    <img src="https://i2.hdslb.com/bfs/archive/f82fd050b0d7d6c9e91261f04574e1d8f26d688e.jpg@308w_174h" alt="效果展示" width="400">
+  </a>
+</p>
+<p align="center">效果展示</p>
 
 ## 为什么做这个项目
 
-官方实现是 Python + PyTorch + cvxpy,放到真实机器人上**太重了**:
+官方实现是 Python + PyTorch + cvxpy,放到真实机器人上占用大:
 
-- **内存:** Python 版内存占用大。在一台已经跑着自瞄和感知的 RoboMaster 哨兵 NUC 上,性能下降较为严重。
+- **内存:** Python 版内存占用大。在一台已经跑着自瞄和感知的哨兵 NUC 上,性能下降较为严重。
 - **延迟与抖动:** cvxpy 每一帧都要重新构建并规范化优化问题,带来延迟。
 
 本项目旨在提供一个精简、确定性强、CPP 实现的 NeuPAN,给机器上其它任务留出余量。
-
----
 
 ## 效果
 
@@ -51,18 +54,16 @@ NRMP 残差来自不同但等价的 QP 求解后端(OSQP 替代 cvxpy/ECOS)。
 另外，没有动辄数秒的 `import torch` / `cvxpy` 启动;帧间抖动也低得多，QP 是预装配 +
 warm start 的,不存在每帧重建问题。
 
-> NUC 上的端到端对比尚待补充——欢迎贡献。但就我自己过去部署 NeuPAN 的经验，性能提升一定是非常可观的。
-> 也可以在自己的工作空间直接跑全流程，并通过 top/htop/btop 工具查看
+> NUC 上的端到端对比数据尚待补充——欢迎贡献。
 
-用仓库自带工具可复现:`libneupan/tools/bench.cpp`(C++)、`libneupan/tools/bench_python.py`(Python)。
+- 用仓库自带工具可复现:`libneupan/tools/bench.cpp`(C++)、`libneupan/tools/bench_python.py`(Python)。
 
----
+- 或直接跑全流程，并通过 top/htop/btop 工具查看
 
 ## 使用场景
 
-**不想维护代价地图**,直接从实时点云避障,而且输出的控制本身就已经
-满足机器人运动学和速度/加速度限制。全局层只需要给一条**拓扑上可行的参考线**
-(本仓库附带一个最小 A\* 全局规划器)
+**不用维护代价地图**,直接从实时点云避障。全局层只需要给一条**拓扑上可行的参考线**
+(本仓库附带一个 A\* 全局规划器示例)
 
 ## C++ 移植(对比 Python 原版)
 
@@ -73,11 +74,9 @@ warm start 的,不存在每帧重建问题。
 | 线性代数 | NumPy / Torch 张量 | Eigen 3.4 |
 | 权重 / 测试数据 | `.pth` / pickle | 紧凑的 `NPTF` 二进制(用 `tools/export_dune_weights.py` 导出一次) |
 | 占用 | Python + Torch + cvxpy(~386 MB) | ~9 MB |
-| 健壮性 | 假设 QP 总能解出 | 未收敛的解不向下传播;输出速度用 speed box 兜底 |
+| 鲁棒性 | 假设 QP 总能解出 | 未收敛的解不向下传播;输出速度用 speed box 兜底 |
 
 DUNE 特意用 **float32** 运行以在数值上对齐 PyTorch。
-
----
 
 ## 项目状态与路线图
 
@@ -85,13 +84,11 @@ DUNE 特意用 **float32** 运行以在数值上对齐 PyTorch。
 - 差速、矩形机器人、直线(`line`)参考
 - DUNE + NRMP + PAN,OSQP 求解
 - ROS 2(Humble)节点,话题与上游 `neupan_ros` 兼容
-- 一个最小参考全局规划器( A\* → `/initial_path`)
+- 一个参考全局规划器( A\* → `/initial_path`)
 
 **路线图:**
 - [ ] 其他运动学适配
 - [ ] 待定
-
----
 
 ## 架构
 
@@ -112,8 +109,6 @@ neupan_cpp/
 
 `libneupan` 是纯 CMake 库,可脱离 ROS 单独使用;`neupan_cpp_ros` 是 `ament_cmake` 包。
 两者一起用 colcon 构建。
-
----
 
 ## 构建
 
@@ -159,8 +154,6 @@ source install/setup.bash
 cd libneupan && cmake -B build -DNEUPAN_BUILD_TESTS=ON && cmake --build build && ctest --test-dir build
 ```
 
----
-
 ## 使用
 
 ### ROS 2 
@@ -193,8 +186,6 @@ DUNE 网络把机器人外形编码进了权重,所以**必须用你自己机器
 ```bash
 python tools/export_dune_weights.py model_5000.pth your_robot.bin 4
 ```
-
----
 
 ## 致谢与许可
 
