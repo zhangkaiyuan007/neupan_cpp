@@ -51,7 +51,7 @@ NRMP 残差来自不同但等价的 QP 求解后端(OSQP 替代 cvxpy/ECOS)。
 | 完整规划帧 | ~7.9 ms | ~2.3 ms | **~3.5×** |
 | **峰值内存(RSS)** | **386 MB** | **9 MB** | **~43×** |
 
-另外，没有动辄数秒的 `import torch` / `cvxpy` 启动;帧间抖动也低得多，QP 是预装配 +
+另外，没有了 `import torch` / `cvxpy` 启动，帧间抖动也低得多，QP 是预装配 +
 warm start 的,不存在每帧重建问题。
 
 > NUC 上的端到端对比数据尚待补充——欢迎贡献。
@@ -70,7 +70,7 @@ warm start 的,不存在每帧重建问题。
 | | Python 原版 | neupan_cpp |
 |---|---|---|
 | DUNE 推理 | PyTorch `nn.Module` | 手写 float32 MLP(Linear / LayerNorm / Tanh / ReLU),读导出的权重,**不依赖 libtorch** |
-| NRMP 求解 | cvxpy + cvxpylayers,**每帧重建并规范化**问题(ECOS) | **预装配稀疏 QP**,用 **OSQP** + osqp-eigen;Hessian 和稀疏结构恒定,每帧只就地更新梯度/边界/数值,并 **warm start** |
+| NRMP 求解 | cvxpy + cvxpylayers,**每帧重建并规范化**问题(ECOS) | Hessian 和稀疏结构恒定,每帧只就地更新梯度/边界/数值,并 **warm start** |
 | 线性代数 | NumPy / Torch 张量 | Eigen 3.4 |
 | 权重 / 测试数据 | `.pth` / pickle | 紧凑的 `NPTF` 二进制(用 `tools/export_dune_weights.py` 导出一次) |
 | 占用 | Python + Torch + cvxpy(~386 MB) | ~9 MB |
