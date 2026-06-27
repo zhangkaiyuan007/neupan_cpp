@@ -1,5 +1,7 @@
 # neupan_cpp
 
+English version [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md)
+
 **[NeuPAN](https://github.com/hanruihua/NeuPAN)** 的 C++ 移植(Ruihua Han 等,T-RO 2025)
 
 `neupan_cpp` 完整复现了 NeuPAN 算法(DUNE + NRMP + PAN),但**运行时不依赖 PyTorch、
@@ -58,7 +60,7 @@ warm start 的,不存在每帧重建问题。
 
 - 用仓库自带工具可复现:`libneupan/tools/bench.cpp`(C++)、`libneupan/tools/bench_python.py`(Python)。
 
-- 或直接跑全流程，并通过 top/htop/btop 工具查看
+- 或直接跑全流程，并通过 ```top/htop/btop``` 工具查看
 
 ## 使用场景
 
@@ -86,7 +88,7 @@ DUNE 特意用 **float32** 运行以在数值上对齐 PyTorch。
 - ROS 2(Humble)节点,话题与上游 `neupan_ros` 兼容
 - 一个参考全局规划器( A\* → `/initial_path`)
 
-**路线图:**
+**路线图(TODO):**
 - [ ] 其他运动学适配
 - [ ] 待定
 
@@ -97,12 +99,12 @@ neupan_cpp/
 ├── libneupan/         # 核心算法
 │   ├── include/neupan/ 
 │   ├── src/
-│   ├── models/          导出的 DUNE 权重 (.bin)
-│   ├── tests/           单元测试
-│   └── tools/           权重导出、基准测试
+│   ├── models/        # 导出的 DUNE 权重 (.bin)
+│   ├── tests/         # 单元测试
+│   └── tools/         # 权重导出、基准测试
 └── neupan_cpp_ros/    # ROS 2(Humble)封装
-    ├── src/neupan_node.cpp          规划器节点
-    ├── src/astar_global_node.cpp    参考全局规划器
+    ├── src/neupan_node.cpp         # 规划器节点
+    ├── src/astar_global_node.cpp   # 参考全局规划器
     ├── config/ launch/
     └── test/          
 ```
