@@ -167,7 +167,8 @@ neupan_cpp/
 └── neupan_cpp_ros/    # ROS 2(Humble)封装
     ├── src/neupan_node.cpp         # 规划器节点
     ├── src/astar_global_node.cpp   # 参考全局规划器
-    ├── config/ launch/
+    ├── config/
+    ├── launch/
     └── test/          
 ```
 
