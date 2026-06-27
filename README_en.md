@@ -11,7 +11,7 @@ This is **[NeuPAN](https://github.com/hanruihua/NeuPAN)** 's C++ transplant.
 This repo consists of a standalone core library (`libneupan`) and a ROS 2 node (`neupan_cpp_ros`).
 
 > Differential drive (rectangular robot + global path reference) has been implemented and validated in simulation.
-> Omnidirectional drive adaptation is up next. See [Project Status and Roadmap](https://github.com/zhangkaiyuan007/neupan_cpp/new/main#project-status-and-roadmap).
+> Omnidirectional drive adaptation is up next. See [Project Status and Roadmap](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md#project-status-and-roadmap).
 
 ## Why This?
 
