@@ -2,9 +2,7 @@
 
 English version [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md)
 
-**[NeuPAN](https://github.com/hanruihua/NeuPAN)** 的 C++ 移植(Ruihua Han 等,T-RO 2025)
-
-`neupan_cpp` 完整复现了 NeuPAN 算法(DUNE + NRMP + PAN),但**运行时不依赖 PyTorch、
+`neupan_cpp` 完整复现了 **[NeuPAN](https://github.com/hanruihua/NeuPAN)** 算法(DUNE + NRMP + PAN),但**运行时不依赖 PyTorch、
 不依赖 cvxpy**,因此能塞进 NUC 且与机器人其余的自治栈共存。它包含一个独立核心库
 (`libneupan`)和一个 ROS 2 节点(`neupan_cpp_ros`)。
 
@@ -18,7 +16,76 @@ English version [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main
 </p>
 <p align="center">效果展示</p>
 
-## 为什么做这个项目
+## 快速开始
+
+依赖:Eigen 3.4、[osqp](https://github.com/osqp/osqp) +
+[osqp-eigen](https://github.com/robotology/osqp-eigen)、yaml-cpp、GTest(测试用)、
+以及 ROS 2 Humble。
+
+```bash
+# osqp
+cd ~
+git clone https://github.com/osqp/osqp
+cd osqp
+mkdir build
+cd build
+cmake -G "Unix Makefiles" ..
+cmake --build .
+sudo cmake --build . --target install
+```
+
+```bash
+# osqp-eigen
+cd ~
+git clone https://github.com/gbionics/osqp-eigen.git
+cd osqp-eigen
+mkdir build
+cd build
+cmake ../
+make
+sudo make install
+```
+
+```bash
+# 在自己的工作空间下
+cd src
+git clone https://github.com/zhangkaiyuan007/neupan_cpp.git
+colcon build
+source install/setup.bash
+```
+
+### 为你的机器人训练 DUNE 模型
+
+DUNE 网络把机器人外形编码进了权重,所以**必须用你自己机器人的尺寸训一个模型**。用上游 Python
+工具训练一次,再导出为本库读取的 `NPTF` 格式:
+
+```bash
+python tools/export_dune_weights.py model_5000.pth your_robot.bin 4
+```
+
+## 使用
+
+```bash
+ros2 launch neupan_cpp_ros neupan.launch.py
+```
+
+| 方向 | 话题 | 类型 |
+|---|---|---|
+| 输入 | `/scan` | `sensor_msgs/LaserScan`(障碍点) |
+| 输入 | `/initial_path` | `nav_msgs/Path`(全局参考线) |
+| 输入 | `/neupan_goal` | `geometry_msgs/PoseStamped`(直线参考) |
+| 输出 | `/neupan_cmd_vel` | `geometry_msgs/Twist` |
+| 输出 | `/neupan_plan`、`/neupan_initial_path`、`/dune_point_markers` … | 可视化 |
+
+规划器配置是**与上游兼容**的 `planner.yaml`(键名与原版 NeuPAN 一致)。主要调参:
+`collision_threshold`(硬急停距离)、`adjust.d_max` / `d_min`(贴障碍多近)、`ref_speed`、
+`max_speed`。
+
+### 一个参考全局规划器(可选)
+
+`astar_global_node` 订阅 `/map` ,按机器人半径膨胀,通过订阅 `/goal_pose` 跑 A\*,把路径发到 `/initial_path`。
+
+## 项目背景
 
 官方实现是 Python + PyTorch + cvxpy,放到真实机器人上占用大:
 
@@ -61,11 +128,6 @@ warm start 的,不存在每帧重建问题。
 - 用仓库自带工具可复现:`libneupan/tools/bench.cpp`(C++)、`libneupan/tools/bench_python.py`(Python)。
 
 - 或直接跑全流程，并通过 ```top/htop/btop``` 工具查看
-
-## 使用场景
-
-**不用维护代价地图**,直接从实时点云避障。全局层只需要给一条**拓扑上可行的参考线**
-(本仓库附带一个 A\* 全局规划器示例)
 
 ## C++ 移植(对比 Python 原版)
 
@@ -112,82 +174,7 @@ neupan_cpp/
 `libneupan` 是纯 CMake 库,可脱离 ROS 单独使用;`neupan_cpp_ros` 是 `ament_cmake` 包。
 两者一起用 colcon 构建。
 
-## 构建
 
-依赖:Eigen 3.4、[osqp](https://github.com/osqp/osqp) +
-[osqp-eigen](https://github.com/robotology/osqp-eigen)、yaml-cpp、GTest(测试用)、
-以及 ROS 2 Humble。
-
-```bash
-# osqp
-cd ~
-git clone https://github.com/osqp/osqp
-cd osqp
-mkdir build
-cd build
-cmake -G "Unix Makefiles" ..
-cmake --build .
-sudo cmake --build . --target install
-```
-
-```bash
-# osqp-eigen
-cd ~
-git clone https://github.com/gbionics/osqp-eigen.git
-cd osqp-eigen
-mkdir build
-cd build
-cmake ../
-make
-sudo make install
-```
-
-```bash
-# 在自己的工作空间下
-cd src
-git clone https://github.com/zhangkaiyuan007/neupan_cpp.git
-colcon build
-source install/setup.bash
-```
-
-跑单元测试:
-
-```bash
-cd libneupan && cmake -B build -DNEUPAN_BUILD_TESTS=ON && cmake --build build && ctest --test-dir build
-```
-
-## 使用
-
-### ROS 2 
-
-```bash
-ros2 launch neupan_cpp_ros neupan.launch.py
-```
-
-| 方向 | 话题 | 类型 |
-|---|---|---|
-| 输入 | `/scan` | `sensor_msgs/LaserScan`(障碍点) |
-| 输入 | `/initial_path` | `nav_msgs/Path`(全局参考线) |
-| 输入 | `/neupan_goal` | `geometry_msgs/PoseStamped`(直线参考) |
-| 输出 | `/neupan_cmd_vel` | `geometry_msgs/Twist` |
-| 输出 | `/neupan_plan`、`/neupan_initial_path`、`/dune_point_markers` … | 可视化 |
-
-规划器配置是**与上游兼容**的 `planner.yaml`(键名与原版 NeuPAN 一致)。主要调参:
-`collision_threshold`(硬急停距离)、`adjust.d_max` / `d_min`(贴障碍多近)、`ref_speed`、
-`max_speed`。
-
-### 一个参考全局规划器(可选)
-
-`astar_global_node` 订阅 `/map` ,按机器人半径膨胀,通过订阅 `/goal_pose` 跑 A\*,把路径发到 `/initial_path`。
-
-### 为你的机器人训练 DUNE 模型
-
-DUNE 网络把机器人外形编码进了权重,所以**必须用你自己机器人的尺寸训一个模型**。用上游 Python
-工具训练一次,再导出为本库读取的 `NPTF` 格式:
-
-```bash
-python tools/export_dune_weights.py model_5000.pth your_robot.bin 4
-```
 
 ## 致谢与许可
 
