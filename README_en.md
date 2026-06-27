@@ -2,11 +2,7 @@
 
 Original Chinese [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README.md)
 
-This is **[NeuPAN](https://github.com/hanruihua/NeuPAN)** 's C++ transplant.
-
-**[NeuPAN](https://github.com/hanruihua/NeuPAN)**(Ruihua Han et al., T-RO 2025)
-
-`neupan_cpp` is a complete reproduction of the NeuPAN algorithm (DUNE + NRMP + PAN). **NO PyTorch or cvxpy** required at runtime, so we can run it on lightweight computers like Intel NUC and coexist with robot's autonomy stack. 
+`neupan_cpp` is a complete reproduction of the **[NeuPAN](https://github.com/hanruihua/NeuPAN)** algorithm (DUNE + NRMP + PAN). **NO PyTorch or cvxpy** required at runtime, so we can run it on lightweight computers like Intel NUC and coexist with robot's autonomy stack. 
 
 This repo consists of a standalone core library (`libneupan`) and a ROS 2 node (`neupan_cpp_ros`).
 
@@ -20,7 +16,74 @@ This repo consists of a standalone core library (`libneupan`) and a ROS 2 node (
 </p>
 <p align="center">Video Demo</p>
 
-## Why This?
+## Quick start
+
+Dependencies: Eigen 3.4, [osqp](https://github.com/osqp/osqp) + [osqp-eigen](https://github.com/robotology/osqp-eigen), yaml-cpp, GTest (for test), and ROS 2 Humble.
+
+```bash
+# osqp
+cd ~
+git clone https://github.com/osqp/osqp
+cd osqp
+mkdir build
+cd build
+cmake -G "Unix Makefiles" ..
+cmake --build .
+sudo cmake --build . --target install
+```
+
+```bash
+# osqp-eigen
+cd ~
+git clone https://github.com/gbionics/osqp-eigen.git
+cd osqp-eigen
+mkdir build
+cd build
+cmake ../
+make
+sudo make install
+```
+
+```bash
+# In your ros2 workspace
+cd src
+git clone https://github.com/zhangkaiyuan007/neupan_cpp.git
+colcon build
+source install/setup.bash
+```
+
+### Training a DUNE Model for Your Robot
+
+The DUNE network encodes the robot's shape directly into its weights, so you must **train a model using your own robot's dimensions**. Train it once using the upstream Python tools, then export it to the `NPTF` format required by this repository:
+
+```bash
+python tools/export_dune_weights.py model_5000.pth your_robot.bin 4
+```
+
+## Usage
+
+```bash
+ros2 launch neupan_cpp_ros neupan.launch.py
+
+```
+
+| Direction | Topic                                                        | Type                                                  |
+| --------- | ------------------------------------------------------------ | ----------------------------------------------------- |
+| Input     | `/scan`                                                      | `sensor_msgs/LaserScan` (Obstacle points)             |
+| Input     | `/initial_path`                                              | `nav_msgs/Path` (Global reference line)               |
+| Input     | `/neupan_goal`                                               | `geometry_msgs/PoseStamped` (Straight line reference) |
+| Output    | `/neupan_cmd_vel`                                            | `geometry_msgs/Twist`                                 |
+| Output    | `/neupan_plan`, `/neupan_initial_path`, `/dune_point_markers` … | Visualization                                         |
+
+The planner configuration uses `planner.yaml`, which is **fully compatible with the upstream version** (key names match original NeuPAN). 
+
+Key tuning parameters: `collision_threshold` (hard emergency stop distance), `adjust.d_max` / `d_min` (how close it can get to obstacles), `ref_speed`, and `max_speed`.
+
+### Reference Global Planner (Optional)
+
+`astar_global_node` subscribes  `/map`, inflates it based on the robot's radius, and runs A* algorithm after subscribe `/goal_pose`, then publish the resulting path to `/initial_path`.
+
+## Motivation
 
 The official implementation uses Python + PyTorch + cvxpy, which consumes excessive resources on a real robot:
 
@@ -63,10 +126,6 @@ Without  `import torch` / `cvxpy`, inter-frame jitter is drastically lower. The 
 
 * You can reproduce these results using the built-in benchmarking tools: `libneupan/tools/bench.cpp` and `libneupan/tools/bench_python.py`.
 * Alternatively, run the full pipeline and monitor via tools like ```top/htop/btop```.
-
-## Use Cases
-
-**No costmap maintenance required**. It performs obstacle avoidance directly from real-time point clouds. The global layer only needs to provide a **topologically feasible reference line** (an A* global planner example is included in this repository).
 
 ## C++ Porting Details (vs. Original Python)
 
@@ -116,80 +175,7 @@ neupan_cpp/
 
 `libneupan` is a pure CMake library that can be used independently of ROS; `neupan_cpp_ros` is an `ament_cmake` package. Both are built together using ```colcon```.
 
-## Building
 
-Dependencies: Eigen 3.4, [osqp](https://github.com/osqp/osqp) + [osqp-eigen](https://github.com/robotology/osqp-eigen), yaml-cpp, GTest (for test), and ROS 2 Humble.
-
-```bash
-# osqp
-cd ~
-git clone https://github.com/osqp/osqp
-cd osqp
-mkdir build
-cd build
-cmake -G "Unix Makefiles" ..
-cmake --build .
-sudo cmake --build . --target install
-```
-
-```bash
-# osqp-eigen
-cd ~
-git clone https://github.com/gbionics/osqp-eigen.git
-cd osqp-eigen
-mkdir build
-cd build
-cmake ../
-make
-sudo make install
-```
-
-```bash
-# In your ros2 workspace
-cd src
-git clone https://github.com/zhangkaiyuan007/neupan_cpp.git
-colcon build
-source install/setup.bash
-```
-
-To run unit tests:
-
-```bash
-cd libneupan && cmake -B build -DNEUPAN_BUILD_TESTS=ON && cmake --build build && ctest --test-dir build
-```
-
-## Usage
-
-### ROS 2
-
-```bash
-ros2 launch neupan_cpp_ros neupan.launch.py
-
-```
-
-| Direction | Topic                                                        | Type                                                  |
-| --------- | ------------------------------------------------------------ | ----------------------------------------------------- |
-| Input     | `/scan`                                                      | `sensor_msgs/LaserScan` (Obstacle points)             |
-| Input     | `/initial_path`                                              | `nav_msgs/Path` (Global reference line)               |
-| Input     | `/neupan_goal`                                               | `geometry_msgs/PoseStamped` (Straight line reference) |
-| Output    | `/neupan_cmd_vel`                                            | `geometry_msgs/Twist`                                 |
-| Output    | `/neupan_plan`, `/neupan_initial_path`, `/dune_point_markers` … | Visualization                                         |
-
-The planner configuration uses `planner.yaml`, which is **fully compatible with the upstream version** (key names match original NeuPAN). 
-
-Key tuning parameters: `collision_threshold` (hard emergency stop distance), `adjust.d_max` / `d_min` (how close it can get to obstacles), `ref_speed`, and `max_speed`.
-
-### Reference Global Planner (Optional)
-
-`astar_global_node` subscribes  `/map`, inflates it based on the robot's radius, and runs A* algorithm after subscribe `/goal_pose`, then publish the resulting path to `/initial_path`.
-
-### Training a DUNE Model for Your Robot
-
-The DUNE network encodes the robot's shape directly into its weights, so you must **train a model using your own robot's dimensions**. Train it once using the upstream Python tools, then export it to the `NPTF` format required by this repository:
-
-```bash
-python tools/export_dune_weights.py model_5000.pth your_robot.bin 4
-```
 
 ## Acknowledgments and License
 
