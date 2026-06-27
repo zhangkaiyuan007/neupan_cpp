@@ -13,6 +13,13 @@ This repo consists of a standalone core library (`libneupan`) and a ROS 2 node (
 > Differential drive (rectangular robot + global path reference) has been implemented and validated in simulation.
 > Omnidirectional drive adaptation is up next. See [Project Status and Roadmap](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md#project-status-and-roadmap).
 
+<p align="center">
+  <a href="https://b23.tv/tUGI5hV">
+    <img src="https://i2.hdslb.com/bfs/archive/f82fd050b0d7d6c9e91261f04574e1d8f26d688e.jpg@308w_174h" alt="Video Demo(bilibili)" width="500">
+  </a>
+</p>
+<p align="center">Video Demo</p>
+
 ## Why This?
 
 The official implementation uses Python + PyTorch + cvxpy, which consumes excessive resources on a real robot:
