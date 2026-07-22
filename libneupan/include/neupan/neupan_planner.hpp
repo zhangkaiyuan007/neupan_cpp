@@ -31,7 +31,8 @@ class NeuPANPlanner {
     double ref_speed = 4.0;
     double collision_threshold = 0.1;
 
-    // robot (diff rectangle)
+    // robot (differential or Ackermann rectangle)
+    Kinematics kinematics = Kinematics::Diff;
     Vec2 max_speed{8.0, 1.0};
     Vec2 max_acce{8.0, 3.0};
     double length = 1.6;
