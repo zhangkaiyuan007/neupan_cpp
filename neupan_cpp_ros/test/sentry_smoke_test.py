@@ -4,7 +4,13 @@
 Broadcasts identity TF (map->base_footprint, map->base_link), publishes a
 /goal_pose (RViz "2D Nav Goal" equivalent) and a synthetic /scan, and verifies
 neupan_node loads the diff_sentry model and emits /cmd_vel toward the goal.
-Run `ros2 launch neupan_cpp_ros sentry.launch.py` alongside this script.
+
+There is no sentry launch file; start the node against the sentry pair by hand:
+
+    ros2 run neupan_cpp_ros neupan_node --ros-args \
+      -p config_file:=<share>/config/sentry_diff.yaml \
+      -p dune_checkpoint:=<share>/models/diff_sentry.bin \
+      -r /neupan_cmd_vel:=/cmd_vel
 """
 import math
 import sys

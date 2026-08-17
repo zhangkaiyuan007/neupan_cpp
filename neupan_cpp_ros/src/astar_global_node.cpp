@@ -41,11 +41,14 @@ class AStarGlobalNode : public rclcpp::Node {
  public:
   AStarGlobalNode() : Node("astar_global_node") {
     map_frame_ = declare_parameter<std::string>("map_frame", "map");
-    base_frame_ = declare_parameter<std::string>("base_frame", "base_footprint");
-    robot_radius_ = declare_parameter<double>("robot_radius", 0.30);
+    base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
+    // Footprint circumradius plus room for localization drift.
+    robot_radius_ = declare_parameter<double>("robot_radius", 0.45);
     allow_unknown_ = declare_parameter<bool>("allow_unknown", false);
     // Douglas-Peucker tolerance (m): larger -> fewer, coarser waypoints.
     simplify_tol_ = declare_parameter<double>("simplify_tolerance", 0.15);
+    // Decision layers republish the same goal every tick; without this each one replans.
+    goal_tolerance_ = declare_parameter<double>("goal_tolerance", 0.3);
 
     path_pub_ = create_publisher<nav_msgs::msg::Path>("/initial_path", 10);
 
@@ -124,9 +127,14 @@ class AStarGlobalNode : public rclcpp::Node {
 
   void onGoal(const geometry_msgs::msg::PoseStamped& goal) {
     if (!have_map_) {
-      RCLCPP_WARN(get_logger(), "no map yet, ignoring goal");
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "no map yet, ignoring goal");
       return;
     }
+    if (have_path_ &&
+        std::hypot(goal.pose.position.x - last_goal_x_,
+                   goal.pose.position.y - last_goal_y_) < goal_tolerance_)
+      return;
     geometry_msgs::msg::TransformStamped tf;
     try {
       tf = tf_buffer_->lookupTransform(map_frame_, base_frame_,
@@ -141,16 +149,21 @@ class AStarGlobalNode : public rclcpp::Node {
     if (!worldToCell(tf.transform.translation.x, tf.transform.translation.y,
                      sx, sy) ||
         !worldToCell(goal.pose.position.x, goal.pose.position.y, gx, gy)) {
-      RCLCPP_WARN(get_logger(), "start or goal outside the map");
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "start or goal outside the map");
       return;
     }
     // Nudge endpoints out of inflated cells (robot/goal hugging a wall).
     snapToFree(sx, sy);
+    const int gx_asked = gx, gy_asked = gy;
     snapToFree(gx, gy);
+    const bool goal_snapped = gx != gx_asked || gy != gy_asked;
 
     const std::vector<int> cells = astar(sy * w_ + sx, gy * w_ + gx);
     if (cells.empty()) {
-      RCLCPP_WARN(get_logger(), "A* found no path to goal");
+      // An empty path would stall the local planner without saying why.
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "A* found no path to goal, keeping the previous one");
       return;
     }
 
@@ -160,7 +173,15 @@ class AStarGlobalNode : public rclcpp::Node {
       pts.push_back({ox_ + (c % w_ + 0.5) * res_, oy_ + (c / w_ + 0.5) * res_});
     pts = simplify(pts, simplify_tol_);
 
+    // A cell centre sits up to half a cell short of the goal; a snapped goal is
+    // not somewhere to drive to, so only the asked-for one replaces the end.
+    if (!goal_snapped && !pts.empty())
+      pts.back() = {goal.pose.position.x, goal.pose.position.y};
+
     publishPath(pts, goal);
+    last_goal_x_ = goal.pose.position.x;
+    last_goal_y_ = goal.pose.position.y;
+    have_path_ = true;
     RCLCPP_INFO(get_logger(), "published global path: %zu cells -> %zu waypoints",
                 cells.size(), pts.size());
   }
@@ -302,8 +323,11 @@ class AStarGlobalNode : public rclcpp::Node {
   }
 
   std::string map_frame_, base_frame_;
-  double robot_radius_, simplify_tol_;
+  double robot_radius_, simplify_tol_, goal_tolerance_;
   bool allow_unknown_ = false;
+
+  double last_goal_x_ = 0.0, last_goal_y_ = 0.0;
+  bool have_path_ = false;
 
   nav_msgs::msg::OccupancyGrid map_;
   std::vector<uint8_t> blocked_;

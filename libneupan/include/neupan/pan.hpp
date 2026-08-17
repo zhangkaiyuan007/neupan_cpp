@@ -43,6 +43,9 @@ class PAN {
     double min_distance;  // min DUNE distance at stage 0 (inf if no points)
     Mat2X dune_points;    // downsampled obstacle points fed to DUNE (stage 0)
     Mat2X nrmp_points;    // closest points used by NRMP (visualization)
+    // False: no solve converged, so opt_u is the nominal with no avoidance.
+    bool solved = false;
+    int solver_status = -1;  // raw OsqpEigen::Status of the last solve
   };
 
   // points: (2, N) global frame, may be empty (0 cols).

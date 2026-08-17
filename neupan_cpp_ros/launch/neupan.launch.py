@@ -14,7 +14,7 @@ def generate_launch_description():
         package='neupan_cpp_ros',
         executable='neupan_node',
         name='neupan_node',
-        output='sreen',
+        output='screen',
         parameters=[{
             'config_file': default_config,
             'dune_checkpoint': default_model,
@@ -24,7 +24,7 @@ def generate_launch_description():
         ],
     )
 
-    astart_node = Node(
+    astar_node = Node(
         package='neupan_cpp_ros',
         executable='astar_global_node',
         name='astar_global_node',
@@ -33,6 +33,6 @@ def generate_launch_description():
 
     ld = LaunchDescription()
     ld.add_action(neupan_node)
-    ld.add_action(astart_node)
+    ld.add_action(astar_node)
 
     return ld

@@ -34,3 +34,6 @@ venv/
 
 # NOTE: models/*.bin and libneupan/tests/data/*.nptf are intentionally
 # tracked -- they are required to run the demo and the unit tests.
+
+# Build logs from local cmake/make runs
+build_logs/

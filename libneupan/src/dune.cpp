@@ -13,16 +13,50 @@
 #include "neupan/dune.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
 
+#include "neupan/tensor_io.hpp"
+
 namespace neupan {
+
+namespace {
+
+// mu is only a valid distance for the (G, h) the network was trained against.
+void checkCheckpointGeometry(const std::string& path, const Mat& G,
+                             const Vec& h) {
+  const TensorFile tf = TensorFile::load(path);
+  if (!tf.has("meta.G") || !tf.has("meta.h")) {
+    std::fprintf(stderr,
+                 "[neupan] WARNING: %s carries no footprint metadata, so it "
+                 "cannot be checked against the configured robot. Re-export "
+                 "with tools/export_dune_weights.py to enable the check.\n",
+                 path.c_str());
+    return;
+  }
+
+  const Mat& mG = tf.at("meta.G");
+  const Mat& mh = tf.at("meta.h");
+  const bool shape_ok =
+      mG.rows() == G.rows() && mG.cols() == G.cols() && mh.size() == h.size();
+  if (!shape_ok || (mG - G).cwiseAbs().maxCoeff() > 1e-6 ||
+      (mh.reshaped() - h).cwiseAbs().maxCoeff() > 1e-6)
+    throw std::runtime_error(
+        "dune: " + path +
+        " was trained for a different robot footprint than the one "
+        "configured; distances would be wrong. Retrain or fix robot "
+        "length/width in the planner yaml.");
+}
+
+}  // namespace
 
 DUNE::DUNE(const Robot& robot, const std::string& checkpoint_path)
     : mlp_(MLP::load(checkpoint_path)), G_(robot.G), h_(robot.h), T_(robot.T) {
   if (mlp_.outputDim() != G_.rows())
     throw std::runtime_error("dune: checkpoint edge_dim mismatch with robot G");
+  checkCheckpointGeometry(checkpoint_path, G_, h_);
 }
 
 DUNE::Output DUNE::forward(const std::vector<Mat2X>& point_flow,

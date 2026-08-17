@@ -116,6 +116,25 @@ void InitialPath::setInitialPath(std::vector<PathPoint> path) {
   setPath(generateLineCurve(waypoints));
 }
 
+void InitialPath::replaceInitialPath(std::vector<PathPoint> path,
+                                     const Vec3& state) {
+  setInitialPath(std::move(path));
+
+  double best = std::numeric_limits<double>::infinity();
+  for (size_t c = 0; c < curve_list_.size(); ++c) {
+    const auto& curve = curve_list_[c];
+    for (size_t i = 0; i < curve.size(); ++i) {
+      const double dis = (state.head<2>() - curve[i].head<2>()).norm();
+      if (dis < best) {
+        best = dis;
+        curve_index_ = static_cast<int>(c);
+        point_index_ = static_cast<int>(i);
+      }
+    }
+  }
+  arrive_flag_ = false;
+}
+
 void InitialPath::setIpathWithWaypoints(const std::vector<Vec3>& waypoints) {
   setPath(generateLineCurve(waypoints));
 }
@@ -161,6 +180,8 @@ bool InitialPath::checkCurveArrive(const Vec3& state) const {
 
 bool InitialPath::checkArrive(const Vec3& state) {
   if (!hasPath()) setIpathWithState(state);
+  // Latch: recomputing every cycle flickers off when the robot settles past the end.
+  if (arrive_flag_) return true;
   closestPoint(state, opts_.close_threshold, opts_.ind_range);
 
   if (checkCurveArrive(state)) {

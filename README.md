@@ -60,8 +60,11 @@ DUNE 网络把机器人外形编码进了权重,所以**必须用你自己机器
 工具训练一次,再导出为本库读取的 `NPTF` 格式:
 
 ```bash
-python tools/export_dune_weights.py model_5000.pth your_robot.bin 4
+python tools/export_dune_weights.py model_5000.pth your_robot.bin <length> <width> [wheelbase] [edge_dim]
 ```
+
+`length`/`width` 填训练时的外形,不是当前机器人的尺寸。它们会写进权重文件,加载时与
+`planner.yaml` 的 `robot.length`/`robot.width` 比对,不一致即报错。
 
 ## 使用
 
@@ -74,12 +77,21 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | 输入 | `/scan` | `sensor_msgs/LaserScan`(障碍点) |
 | 输入 | `/initial_path` | `nav_msgs/Path`(全局参考线) |
 | 输入 | `/neupan_goal` | `geometry_msgs/PoseStamped`(直线参考) |
-| 输出 | `/neupan_cmd_vel` | `geometry_msgs/Twist` |
+| 输入 | `/neupan_waypoints` | `nav_msgs/Path`(航点折线) |
+| 输出 | `/neupan_cmd_vel` | `geometry_msgs/Twist`,launch 里 remap 为 `/cmd_vel` |
+| 输出 | `/neupan_arrive` | `std_msgs/Bool`,每周期发布,到点后保持 true 直到换路径 |
+| 输出 | `/neupan_diagnostics` | `diagnostic_msgs/DiagnosticArray`,求解状态、连续失败次数、最小距离、卡死标志 |
 | 输出 | `/neupan_plan`、`/neupan_initial_path`、`/dune_point_markers` … | 可视化 |
 
-规划器配置是**与上游兼容**的 `planner.yaml`(键名与原版 NeuPAN 一致)。主要调参:
+规划器配置沿用 `planner.yaml` 的键名,但只支持 `kinematics: diff` 与 `curve_style: line`,
+`loop: true` 未移植。`d_min < 0`、`d_max < d_min`、`eta > 0` 而 `d_max <= 0`、
+`collision_threshold <= 0` 这几种组合会在加载时抛异常。主要调参:
 `collision_threshold`(硬急停距离)、`adjust.d_max` / `d_min`(贴障碍多近)、`ref_speed`、
 `max_speed`。
+
+节点参数:`config_file` 与 `dune_checkpoint` 必填,缺失即抛异常。`scan_timeout` 默认
+0.5 s,超时后清空障碍点并停车。`solver_fail_grace` 默认 5,连续求解失败超过此数即停车。
+`stall_speed` 与 `stall_timeout` 默认 0.02 m/s 与 3 s,用于判定卡死。
 
 ### 一个参考全局规划器(可选)
 
@@ -105,7 +117,7 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | DUNE MLP 逐层输出 | 最大绝对误差 **1.9e-7**(float32 与 PyTorch 对齐) |
 | DUNE 完整前向(µ、距离) | 误差 **~3.6e-7**,障碍点选择**完全一致** |
 | NRMP 单帧动作 | 误差 **~1.3%**,目标函数相对误差 **~1e-4** |
-| 50 帧闭环回放 | 平均动作误差 **< 1%**,最小距离**逐帧精确一致** |
+| 50 帧开环回放,每帧同步上游标称控制序列 | 平均动作误差 **< 1%**,最小距离逐帧一致,容差 0.05 m |
 
 NRMP 残差来自不同但等价的 QP 求解后端(OSQP 替代 cvxpy/ECOS)。
 

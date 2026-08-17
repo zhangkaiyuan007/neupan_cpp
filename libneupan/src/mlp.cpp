@@ -41,6 +41,9 @@ MLP MLP::load(const std::string& path) {
     const std::string prefix = name.substr(0, dot);  // "L<i>"
     const std::string rest = name.substr(dot + 1);   // e.g. "linear.weight"
 
+    // Non-layer records (e.g. the trained footprint) belong to other readers.
+    if (prefix == "meta") continue;
+
     if (pending && prefix != pendingPrefix) flush();
     pendingPrefix = prefix;
 

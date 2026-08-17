@@ -55,9 +55,10 @@ class InitialPath {
   void setIpathWithState(const Vec3& state);
   void setIpathWithWaypoints(const std::vector<Vec3>& waypoints);
   void updateInitialPathFromGoal(const Vec3& start, const Vec3& goal);
-  // Port of set_initial_path: install an externally generated discrete path
-  // (e.g. from a global planner); interval becomes the average point spacing.
+  // Port of set_initial_path: installs an external path, re-densified to interval_.
   void setInitialPath(std::vector<PathPoint> path);
+  // setInitialPath, but re-projects the state onto the new path to keep progress.
+  void replaceInitialPath(std::vector<PathPoint> path, const Vec3& state);
   void reset();
 
   bool hasPath() const { return !curve_list_.empty(); }

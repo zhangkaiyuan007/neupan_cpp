@@ -61,6 +61,9 @@ target_compile_definitions(neupan_bench PRIVATE
   NEUPAN_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
   NEUPAN_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
 
+add_executable(neupan_ab_safety_margin tools/ab_safety_margin.cpp)
+target_link_libraries(neupan_ab_safety_margin PRIVATE neupan)
+
 install(TARGETS neupan EXPORT neupanTargets)
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY models/ DESTINATION share/libneupan/models)

@@ -47,6 +47,9 @@ class NeuPANPlanner {
 
   explicit NeuPANPlanner(const Config& config);
 
+  // Throws on self-contradictory parameters that would degrade silently.
+  static void validate(const Config& config);
+
   // Loads the upstream-compatible YAML (planner.yaml). `dune_checkpoint`
   // must point to an exported .bin model; the value can also be overridden
   // by the second argument.
@@ -56,6 +59,9 @@ class NeuPANPlanner {
   struct Info {
     bool arrive = false;
     bool stop = false;
+    // False: the action is a nominal with no avoidance; act on it only briefly.
+    bool solved = false;
+    int solver_status = -1;
     double min_distance = 0.0;
     Mat3X opt_s;        // MPC trajectory
     Mat2X opt_u;        // full control sequence
@@ -80,6 +86,11 @@ class NeuPANPlanner {
   }
   void setInitialPath(std::vector<InitialPath::PathPoint> path) {
     ipath_.setInitialPath(std::move(path));
+  }
+  // Replan without a cold start: keeps progress and the nominal, unlike reset.
+  void replaceInitialPath(std::vector<InitialPath::PathPoint> path,
+                          const Vec3& state) {
+    ipath_.replaceInitialPath(std::move(path), state);
   }
   double collisionThreshold() const { return cfg_.collision_threshold; }
   const Config& config() const { return cfg_; }

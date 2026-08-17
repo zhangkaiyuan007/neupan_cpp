@@ -38,12 +38,16 @@ class AStarTest(Node):
         self._goal_sent = False
 
     def _send_tf(self):
-        t = TransformStamped()
-        t.header.stamp = self.get_clock().now().to_msg()
-        t.header.frame_id = "map"
-        t.child_frame_id = "base_footprint"
-        t.transform.rotation.w = 1.0  # robot at origin
-        self.tf.sendTransform([t])
+        # Both, since the node's default base_frame is base_link.
+        out = []
+        for child in ("base_link", "base_footprint"):
+            t = TransformStamped()
+            t.header.stamp = self.get_clock().now().to_msg()
+            t.header.frame_id = "map"
+            t.child_frame_id = child
+            t.transform.rotation.w = 1.0  # robot at origin
+            out.append(t)
+        self.tf.sendTransform(out)
 
     def _publish_map(self):
         m = OccupancyGrid()

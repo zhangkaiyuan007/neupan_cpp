@@ -3,7 +3,13 @@ Export a NeuPAN DUNE checkpoint (.pth) to the NPTF binary format read by
 libneupan's MLP::load.
 
 Usage (from the upstream NeuPAN repo root, with its venv):
-    python export_dune_weights.py <checkpoint.pth> <out.bin> [edge_dim]
+    python export_dune_weights.py <checkpoint.pth> <out.bin> <length> <width>
+                                  [wheelbase] [edge_dim]
+
+length/width are the footprint the checkpoint was TRAINED for, not whatever the
+robot happens to be now. They are stored in the file so libneupan refuses a
+checkpoint that does not match the configured robot: the network only produces
+valid distances for the footprint it saw.
 
 Part of neupan_cpp, a C++ port of NeuPAN (Copyright (c) 2025 Ruihua Han),
 distributed under the GNU General Public License v3 or later.
@@ -11,13 +17,36 @@ distributed under the GNU General Public License v3 or later.
 
 import sys
 
+import numpy as np
 import torch
 import torch.nn as nn
 
 from nptf import write_nptf
 
 
-def export(checkpoint: str, out_path: str, edge_dim: int = 4):
+def rectangle_gh(length: float, width: float, wheelbase: float = 0.0):
+    """G, h of a rectangle footprint, mirroring Robot::diffRectangle and
+    genInequalFromVertex in libneupan. Keep the two in step."""
+    sx = -(length - wheelbase) / 2.0
+    sy = -width / 2.0
+    v = np.array([[sx, sy],
+                  [sx + length, sy],
+                  [sx + length, sy + width],
+                  [sx, sy + width]], dtype=np.float64)
+
+    n = len(v)
+    G = np.zeros((n, 2), dtype=np.float64)
+    h = np.zeros((n, 1), dtype=np.float64)
+    for i in range(n):
+        pre, nxt = v[i], v[(i + 1) % n]
+        diff = nxt - pre
+        G[i] = (diff[1], -diff[0])
+        h[i] = G[i, 0] * pre[0] + G[i, 1] * pre[1]
+    return G, h
+
+
+def export(checkpoint: str, out_path: str, length: float, width: float,
+           wheelbase: float = 0.0, edge_dim: int = 4):
     from neupan.blocks import ObsPointNet
 
     model = ObsPointNet(2, edge_dim)
@@ -44,11 +73,21 @@ def export(checkpoint: str, out_path: str, edge_dim: int = 4):
         else:
             raise TypeError(f"unsupported layer {type(layer)}")
 
+    G, h = rectangle_gh(length, width, wheelbase)
+    if len(G) != edge_dim:
+        raise ValueError(f"edge_dim {edge_dim} does not match the {len(G)}-edge "
+                         "footprint")
+    records.append(("meta.G", G))
+    records.append(("meta.h", h))
+
     write_nptf(out_path, records)
-    print(f"exported {len(records)} records to {out_path}")
+    print(f"exported {len(records)} records to {out_path} "
+          f"(footprint {length} x {width}, wheelbase {wheelbase})")
 
 
 if __name__ == "__main__":
     ckpt, out = sys.argv[1], sys.argv[2]
-    edge_dim = int(sys.argv[3]) if len(sys.argv) > 3 else 4
-    export(ckpt, out, edge_dim)
+    length, width = float(sys.argv[3]), float(sys.argv[4])
+    wheelbase = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
+    edge_dim = int(sys.argv[6]) if len(sys.argv) > 6 else 4
+    export(ckpt, out, length, width, wheelbase, edge_dim)

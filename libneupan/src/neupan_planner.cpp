@@ -25,10 +25,45 @@ Robot makeRobot(const NeuPANPlanner::Config& c) {
                               c.max_acce, c.length, c.width, c.wheelbase);
 }
 
+// cfg_ is the first member, so this runs before the robot and the blocks.
+const NeuPANPlanner::Config& validated(const NeuPANPlanner::Config& c) {
+  NeuPANPlanner::validate(c);
+  return c;
+}
+
 }  // namespace
 
+void NeuPANPlanner::validate(const Config& c) {
+  const auto fail = [](const std::string& what) {
+    throw std::runtime_error("neupan config: " + what);
+  };
+  const NRMPParams& a = c.adjust;
+
+  if (c.receding < 1 || c.step_time <= 0.0)
+    fail("receding must be >= 1 and step_time > 0");
+
+  if (a.d_min < 0.0)
+    fail("d_min is negative (" + std::to_string(a.d_min) +
+         "); a negative clearance lets the plan penetrate obstacles");
+
+  if (a.d_max < a.d_min)
+    fail("d_max (" + std::to_string(a.d_max) + ") is below d_min (" +
+         std::to_string(a.d_min) + "), leaving the clearance box empty");
+
+  // Shipped as d = 0 with eta = 15 for a whole season, silently.
+  if (a.eta > 0.0 && a.d_max <= 0.0)
+    fail("eta > 0 rewards clearance but d_max is " + std::to_string(a.d_max) +
+         "; the clearance variable is pinned to zero and avoidance has no "
+         "gradient (upstream uses d_min 0.1, d_max 1.0)");
+
+  if (c.collision_threshold <= 0.0)
+    fail("collision_threshold is " + std::to_string(c.collision_threshold) +
+         "; stop would then require min_distance < 0, i.e. the footprint "
+         "already overlapping, which is unrecoverable");
+}
+
 NeuPANPlanner::NeuPANPlanner(const Config& config)
-    : cfg_(config),
+    : cfg_(validated(config)),
       robot_(makeRobot(config)),
       ipath_(robot_, config.ref_speed, config.ipath),
       pan_(robot_, config.dune_checkpoint, config.adjust, config.pan),
@@ -134,6 +169,8 @@ Vec2 NeuPANPlanner::forward(const Vec3& state, const Mat2X& points,
 
   cur_vel_array_ = out.opt_u;
 
+  info.solved = out.solved;
+  info.solver_status = out.solver_status;
   info.min_distance = out.min_distance;
   info.opt_s = out.opt_s;
   info.opt_u = out.opt_u;

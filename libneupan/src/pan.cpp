@@ -139,9 +139,12 @@ PAN::Output PAN::forward(Mat3X nom_s, Mat2X nom_u, const Mat3X& ref_s,
     const NRMP::Result res =
         nrmp_.solve(nom_s, nom_u, ref_s, ref_us, fa_list, fb_list);
 
+    out.solver_status = res.status;
+
     // A non-converged OSQP solve can return a point that violates the hard
     // speed/acceleration box. Keep the last accepted plan instead.
     if (!res.success) break;
+    out.solved = true;
 
     nom_s = res.s;
     nom_u = res.u;

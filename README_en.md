@@ -57,8 +57,10 @@ source install/setup.bash
 The DUNE network encodes the robot's shape directly into its weights, so you must **train a model using your own robot's dimensions**. Train it once using the upstream Python tools, then export it to the `NPTF` format required by this repository:
 
 ```bash
-python tools/export_dune_weights.py model_5000.pth your_robot.bin 4
+python tools/export_dune_weights.py model_5000.pth your_robot.bin <length> <width> [wheelbase] [edge_dim]
 ```
+
+`length`/`width` are the footprint the checkpoint was trained for, not the robot's current size. They are stored in the file and checked against `robot.length`/`robot.width` from `planner.yaml` on load; a mismatch is an error.
 
 ## Usage
 
@@ -72,12 +74,17 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | Input     | `/scan`                                                      | `sensor_msgs/LaserScan` (Obstacle points)             |
 | Input     | `/initial_path`                                              | `nav_msgs/Path` (Global reference line)               |
 | Input     | `/neupan_goal`                                               | `geometry_msgs/PoseStamped` (Straight line reference) |
-| Output    | `/neupan_cmd_vel`                                            | `geometry_msgs/Twist`                                 |
+| Input     | `/neupan_waypoints`                                          | `nav_msgs/Path` (Waypoint polyline)                   |
+| Output    | `/neupan_cmd_vel`                                            | `geometry_msgs/Twist`, remapped to `/cmd_vel` in the launch file |
+| Output    | `/neupan_arrive`                                             | `std_msgs/Bool`, published every cycle, stays true after arrival until the path is replaced |
+| Output    | `/neupan_diagnostics`                                        | `diagnostic_msgs/DiagnosticArray`, solve status, consecutive failures, min distance, stall flag |
 | Output    | `/neupan_plan`, `/neupan_initial_path`, `/dune_point_markers` … | Visualization                                         |
 
-The planner configuration uses `planner.yaml`, which is **fully compatible with the upstream version** (key names match original NeuPAN). 
+The planner configuration keeps `planner.yaml`'s key names, but only `kinematics: diff` and `curve_style: line` are supported and `loop: true` is not ported. The combinations `d_min < 0`, `d_max < d_min`, `eta > 0` with `d_max <= 0`, and `collision_threshold <= 0` throw on load.
 
 Key tuning parameters: `collision_threshold` (hard emergency stop distance), `adjust.d_max` / `d_min` (how close it can get to obstacles), `ref_speed`, and `max_speed`.
+
+Node parameters: `config_file` and `dune_checkpoint` are required and throw when missing. `scan_timeout` defaults to 0.5 s, after which the obstacle points are cleared and the robot stops. `solver_fail_grace` defaults to 5 consecutive failed solves before stopping. `stall_speed` and `stall_timeout` default to 0.02 m/s and 3 s, and flag a stall.
 
 ### Reference Global Planner (Optional)
 
@@ -103,7 +110,7 @@ Item-by-item comparison against the original Python implementation under identic
 | DUNE MLP layer-by-layer output  | Max abs err **1.9e-7** (float32 aligned with PyTorch)        |
 | DUNE full forward (µ, distance) | err **~3.6e-7**, obstacle point selection **identical**      |
 | NRMP single-frame action        | err **~1.3%**, objective function relative err **~1e-4**     |
-| 50 frame closed-loop replay     | Average action err **< 1%**, minimum distance matches **exactly frame-by-frame** |
+| 50 frame open-loop replay, upstream nominal control synced each frame | Average action err **< 1%**, minimum distance matches frame-by-frame within 0.05 m |
 
 The NRMP residual comes from using a different but equivalent QP solver backend (OSQP instead of cvxpy/ECOS).
 

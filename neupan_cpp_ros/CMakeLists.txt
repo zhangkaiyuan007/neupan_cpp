@@ -15,13 +15,16 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 add_executable(neupan_node src/neupan_node.cpp)
 target_link_libraries(neupan_node neupan::neupan)
 ament_target_dependencies(neupan_node
-  rclcpp sensor_msgs nav_msgs geometry_msgs visualization_msgs tf2 tf2_ros)
+  rclcpp sensor_msgs nav_msgs geometry_msgs visualization_msgs std_msgs
+  diagnostic_msgs tf2 tf2_ros)
 
 # Minimal reference global planner (A* on /map -> /initial_path) for demos.
 add_executable(astar_global_node src/astar_global_node.cpp)
