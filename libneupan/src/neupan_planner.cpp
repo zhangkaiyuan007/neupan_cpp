@@ -21,8 +21,15 @@ namespace neupan {
 namespace {
 
 Robot makeRobot(const NeuPANPlanner::Config& c) {
-  return Robot::diffRectangle(c.receding, c.step_time, c.max_speed,
-                              c.max_acce, c.length, c.width, c.wheelbase);
+  switch (c.kinematics) {
+    case Kinematics::Diff:
+      return Robot::diffRectangle(c.receding, c.step_time, c.max_speed,
+                                  c.max_acce, c.length, c.width, c.wheelbase);
+    case Kinematics::Acker:
+      return Robot::ackerRectangle(c.receding, c.step_time, c.max_speed,
+                                   c.max_acce, c.length, c.width, c.wheelbase);
+  }
+  throw std::logic_error("neupan_cpp: unknown kinematics");
 }
 
 // cfg_ is the first member, so this runs before the robot and the blocks.
@@ -83,9 +90,14 @@ NeuPANPlanner NeuPANPlanner::fromYaml(const std::string& yaml_path,
 
   if (const auto r = y["robot"]) {
     const auto kin = r["kinematics"].as<std::string>("diff");
-    if (kin != "diff")
-      throw std::runtime_error("neupan_cpp currently supports only 'diff' "
-                               "kinematics (got '" + kin + "')");
+    if (kin == "diff")
+      c.kinematics = Kinematics::Diff;
+    else if (kin == "acker")
+      c.kinematics = Kinematics::Acker;
+    else
+      throw std::runtime_error(
+          "neupan_cpp supports 'diff' and 'acker' kinematics (got '" + kin +
+          "')");
     if (r["max_speed"]) {
       const auto v = r["max_speed"].as<std::vector<double>>();
       c.max_speed = Vec2(v.at(0), v.at(1));
@@ -97,6 +109,9 @@ NeuPANPlanner NeuPANPlanner::fromYaml(const std::string& yaml_path,
     c.length = r["length"].as<double>(c.length);
     c.width = r["width"].as<double>(c.width);
     c.wheelbase = r["wheelbase"].as<double>(0.0);
+    if (c.kinematics == Kinematics::Acker && c.wheelbase <= 0.0)
+      throw std::runtime_error(
+          "neupan_cpp: robot.wheelbase must be > 0 for 'acker'");
   }
 
   if (const auto ip = y["ipath"]) {

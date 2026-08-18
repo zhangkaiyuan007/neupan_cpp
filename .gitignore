@@ -5,6 +5,7 @@
 /log/
 build/
 build_test/
+/libneupan/build-*/
 
 # ---- CMake ----
 CMakeCache.txt
@@ -31,6 +32,10 @@ venv/
 # ---- ROS ----
 *.bag
 *.db3
+
+# ---- Local simulation evidence ----
+/examples/animation/
+/irsim_*_report.json
 
 # NOTE: models/*.bin and libneupan/tests/data/*.nptf are intentionally
 # tracked -- they are required to run the demo and the unit tests.

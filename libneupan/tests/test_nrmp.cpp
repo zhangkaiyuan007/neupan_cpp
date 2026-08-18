@@ -116,3 +116,36 @@ TEST(Nrmp, SolveMatchesCvxpy) {
       "max objective rel diff %.3e\n",
       n_solves, max_action_diff, max_u0_scale, max_obj_rel);
 }
+
+// Ackermann uses the same preallocated QP and OSQP instance as differential
+// drive. Solving twice exercises both initial setup and the fast in-place
+// matrix update/warm-start path, including Ackermann's additional B(2,0).
+TEST(Nrmp, AckermannReusesFixedSparseProblem) {
+  constexpr int T = 10;
+  const Robot robot = Robot::ackerRectangle(
+      T, 0.1, Vec2(4.0, 0.6), Vec2(3.0, 0.8), 4.5, 1.8, 2.7);
+
+  NRMPParams params;
+  params.max_num = 4;
+  params.ro_obs = 10.0;
+  NRMP nrmp(robot, params);
+
+  Mat3X nom_s = Mat3X::Zero(3, T + 1);
+  Mat2X nom_u = Mat2X::Zero(2, T);
+  Mat3X ref_s = Mat3X::Zero(3, T + 1);
+  Vec ref_us = Vec::Constant(T, 1.0);
+  for (int t = 0; t <= T; ++t) ref_s(0, t) = 0.1 * t;
+
+  const auto first = nrmp.solve(nom_s, nom_u, ref_s, ref_us, {}, {});
+  ASSERT_TRUE(first.success);
+  EXPECT_TRUE(first.u.row(0).cwiseAbs().maxCoeff() <= 4.0 + 1e-8);
+  EXPECT_TRUE(first.u.row(1).cwiseAbs().maxCoeff() <= 0.6 + 1e-8);
+
+  nom_s = first.s;
+  nom_u = first.u;
+  ref_s.row(1).setConstant(0.05);
+  const auto updated = nrmp.solve(nom_s, nom_u, ref_s, ref_us, {}, {});
+  ASSERT_TRUE(updated.success);
+  EXPECT_TRUE(updated.s.allFinite());
+  EXPECT_TRUE(updated.u.allFinite());
+}

@@ -16,19 +16,22 @@
 
 namespace neupan {
 
-enum class Kinematics { Diff };  // v0.2: Omni, later: Acker
+enum class Kinematics { Diff, Acker };
 
 // Port of neupan/robot/robot.py: robot geometry (convex hull G x <= h),
 // velocity/acceleration bounds, and linearized kinematics.
 class Robot {
  public:
   Robot(Kinematics kinematics, int receding, double step_time, Vec2 max_speed,
-        Vec2 max_acce, const Mat2X& vertices);
+        Vec2 max_acce, const Mat2X& vertices, double wheelbase = 0.0);
 
   // Rectangle footprint as in robot.cal_vertices_from_length_width.
   static Robot diffRectangle(int receding, double step_time, Vec2 max_speed,
                              Vec2 max_acce, double length, double width,
                              double wheelbase = 0.0);
+  static Robot ackerRectangle(int receding, double step_time, Vec2 max_speed,
+                              Vec2 max_acce, double length, double width,
+                              double wheelbase);
 
   // Linearized dynamics s_{t+1} = A s_t + B u_t + C around (nom_s_t, nom_u_t).
   void linearize(const Vec3& nom_s_t, const Vec2& nom_u_t, Mat33& A, Mat32& B,
@@ -37,6 +40,7 @@ class Robot {
   Kinematics kinematics;
   int T;
   double dt;
+  double wheelbase;
   Vec2 max_speed;   // speed_bound
   Vec2 acce_bound;  // max_acce * dt
   Mat2X vertices;   // (2, N) CCW
