@@ -12,6 +12,7 @@
 
 #include "neupan/robot.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -71,13 +72,23 @@ void genInequalFromVertex(const Mat2X& vertices, Mat& G, Vec& h) {
 }
 
 Robot::Robot(Kinematics kinematics, int receding, double step_time,
-             Vec2 max_speed_in, Vec2 max_acce, const Mat2X& vertices_in)
+             Vec2 max_speed_in, Vec2 max_acce, const Mat2X& vertices_in,
+             double wheelbase_in)
     : kinematics(kinematics),
       T(receding),
       dt(step_time),
+      wheelbase(wheelbase_in),
       max_speed(std::move(max_speed_in)),
       acce_bound(max_acce * step_time),
       vertices(vertices_in) {
+  if (kinematics == Kinematics::Acker) {
+    if (wheelbase <= 0.0)
+      throw std::invalid_argument("robot: Ackermann wheelbase must be > 0");
+    // Match the Python implementation's guard while staying strictly away
+    // from tan(pi/2), where the linearization becomes singular.
+    constexpr double kMaxSteeringAngle = 1.57;
+    max_speed(1) = std::min(max_speed(1), kMaxSteeringAngle);
+  }
   genInequalFromVertex(vertices, G, h);
 }
 
@@ -92,7 +103,21 @@ Robot Robot::diffRectangle(int receding, double step_time, Vec2 max_speed,
   v.col(2) << sx + length, sy + width;
   v.col(3) << sx, sy + width;
   return Robot(Kinematics::Diff, receding, step_time, std::move(max_speed),
-               std::move(max_acce), v);
+               std::move(max_acce), v, wheelbase);
+}
+
+Robot Robot::ackerRectangle(int receding, double step_time, Vec2 max_speed,
+                            Vec2 max_acce, double length, double width,
+                            double wheelbase) {
+  const double sx = -(length - wheelbase) / 2.0;
+  const double sy = -width / 2.0;
+  Mat2X vertices(2, 4);
+  vertices.col(0) << sx, sy;
+  vertices.col(1) << sx + length, sy;
+  vertices.col(2) << sx + length, sy + width;
+  vertices.col(3) << sx, sy + width;
+  return Robot(Kinematics::Acker, receding, step_time, std::move(max_speed),
+               std::move(max_acce), vertices, wheelbase);
 }
 
 void Robot::linearize(const Vec3& nom_s_t, const Vec2& nom_u_t, Mat33& A,
@@ -110,6 +135,27 @@ void Robot::linearize(const Vec3& nom_s_t, const Vec2& nom_u_t, Mat33& A,
           0, dt;
       C << phi * v * std::sin(phi) * dt, -phi * v * std::cos(phi) * dt, 0;
       break;
+    case Kinematics::Acker: {
+      const double psi = nom_u_t(1);
+      const double sin_phi = std::sin(phi);
+      const double cos_phi = std::cos(phi);
+      const double cos_psi = std::cos(psi);
+      const double inv_l = 1.0 / wheelbase;
+      const double tan_psi = std::tan(psi);
+      const double sec2_psi = 1.0 / (cos_psi * cos_psi);
+
+      // Exact port of Python robot.linear_ackermann_model. Fixed-size Eigen
+      // matrices keep this allocation-free on the per-stage hot path.
+      A << 1, 0, -v * dt * sin_phi,  //
+          0, 1, v * dt * cos_phi,   //
+          0, 0, 1;
+      B << cos_phi * dt, 0,  //
+          sin_phi * dt, 0,   //
+          tan_psi * dt * inv_l, v * dt * inv_l * sec2_psi;
+      C << phi * v * sin_phi * dt, -phi * v * cos_phi * dt,
+          -psi * v * dt * inv_l * sec2_psi;
+      break;
+    }
   }
 }
 

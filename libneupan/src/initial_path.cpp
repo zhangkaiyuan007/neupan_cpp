@@ -19,8 +19,9 @@
 namespace neupan {
 
 double wrapToPi(double rad) {
-  while (rad > M_PI) rad -= 2.0 * M_PI;
-  while (rad < -M_PI) rad += 2.0 * M_PI;
+  constexpr double kPi = 3.14159265358979323846;
+  while (rad > kPi) rad -= 2.0 * kPi;
+  while (rad < -kPi) rad += 2.0 * kPi;
   return rad;
 }
 
@@ -250,6 +251,12 @@ Vec3 InitialPath::motionPredict(const Vec3& state, const Vec2& vel) const {
       const double phi = state(2);
       return state + dt_ * Vec3(vel(0) * std::cos(phi),
                                 vel(0) * std::sin(phi), vel(1));
+    }
+    case Kinematics::Acker: {
+      const double phi = state(2);
+      return state +
+             dt_ * Vec3(vel(0) * std::cos(phi), vel(0) * std::sin(phi),
+                        vel(0) * std::tan(vel(1)) / robot_.wheelbase);
     }
   }
   return state;

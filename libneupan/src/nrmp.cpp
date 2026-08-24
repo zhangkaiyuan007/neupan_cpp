@@ -129,13 +129,14 @@ void NRMP::assemble(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
     robot_.linearize(nom_s.col(t), nom_u.col(t), A, B, C);
 
     for (int r = 0; r < 3; ++r) {
-      // Keep a fixed sparsity pattern: insert all entries that can ever be
-      // nonzero for the diff model, even when currently zero.
+      // Keep one fixed sparsity pattern for both supported models. Ackermann
+      // adds B(2,0), so it must exist from the first OSQP setup even when its
+      // current numerical value is zero. This preserves the fast in-place
+      // matrix update and solver warm start.
       aTrip.emplace_back(row, 3 * t + r, A(r, r));
       if (r < 2) aTrip.emplace_back(row, 3 * t + 2, A(r, 2));
-      if (r < 2)
-        aTrip.emplace_back(row, off_u_ + 2 * t, B(r, 0));
-      else
+      aTrip.emplace_back(row, off_u_ + 2 * t, B(r, 0));
+      if (r == 2)
         aTrip.emplace_back(row, off_u_ + 2 * t + 1, B(r, 1));
       aTrip.emplace_back(row, 3 * (t + 1) + r, -1.0);
       lb_(row) = ub_(row) = -C(r);

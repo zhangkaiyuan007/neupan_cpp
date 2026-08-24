@@ -10,10 +10,17 @@ endif()
 
 option(NEUPAN_NATIVE "Enable -march=native tuning" OFF)
 option(NEUPAN_BUILD_TESTS "Build unit tests" ON)
+option(NEUPAN_BUILD_PYTHON "Build the pybind11 Python module" OFF)
 
 find_package(Eigen3 3.3 REQUIRED)
 find_package(OsqpEigen REQUIRED)
 find_package(yaml-cpp REQUIRED)
+
+if(TARGET yaml-cpp::yaml-cpp)
+  set(NEUPAN_YAML_CPP_TARGET yaml-cpp::yaml-cpp)
+else()
+  set(NEUPAN_YAML_CPP_TARGET yaml-cpp)
+endif()
 
 if(NEUPAN_NATIVE)
   message(WARNING "NEUPAN_NATIVE requires an osqp-eigen built with the same "
@@ -38,14 +45,16 @@ target_include_directories(neupan PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(neupan PUBLIC Eigen3::Eigen OsqpEigen::OsqpEigen
-                                    yaml-cpp)
-target_compile_options(neupan PRIVATE -O3)
+                                    ${NEUPAN_YAML_CPP_TARGET})
+target_compile_options(neupan PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/O2>
+  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-O3>)
 
 if(NEUPAN_BUILD_TESTS)
   enable_testing()
   find_package(GTest REQUIRED)
 
-  foreach(t test_dune test_nrmp test_replay)
+  foreach(t test_robot test_dune test_nrmp test_replay)
     add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE neupan GTest::gtest GTest::gtest_main)
     target_compile_definitions(${t} PRIVATE
@@ -53,6 +62,16 @@ if(NEUPAN_BUILD_TESTS)
       NEUPAN_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
     add_test(NAME ${t} COMMAND ${t})
   endforeach()
+endif()
+
+if(NEUPAN_BUILD_PYTHON)
+  find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+  find_package(pybind11 CONFIG REQUIRED)
+  pybind11_add_module(neupan_cpp_py python/bindings.cpp)
+  target_link_libraries(neupan_cpp_py PRIVATE neupan)
+  set_target_properties(neupan_cpp_py PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python")
 endif()
 
 add_executable(neupan_bench tools/bench.cpp)
