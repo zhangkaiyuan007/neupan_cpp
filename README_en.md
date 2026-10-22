@@ -42,6 +42,8 @@ cd build
 cmake ../
 make
 sudo make install
+# refresh the loader cache, or neupan_node cannot find libOsqpEigen.so
+sudo ldconfig
 ```
 
 ```bash

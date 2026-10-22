@@ -44,6 +44,8 @@ cd build
 cmake ../
 make
 sudo make install
+# 刷新动态库缓存，否则运行 neupan_node 时会找不到 libOsqpEigen.so
+sudo ldconfig
 ```
 
 ```bash

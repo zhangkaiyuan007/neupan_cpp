@@ -92,8 +92,8 @@ class NeuPANNode : public rclcpp::Node {
     plan_pub_ = create_publisher<nav_msgs::msg::Path>("/neupan_plan", 10);
     ref_state_pub_ =
         create_publisher<nav_msgs::msg::Path>("/neupan_ref_state", 10);
-    ref_path_pub_ =
-        create_publisher<nav_msgs::msg::Path>("/neupan_initial_path", 10);
+    ref_path_pub_ = create_publisher<nav_msgs::msg::Path>(
+        "/neupan_initial_path", rclcpp::QoS(1).transient_local());
     dune_markers_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
         "/dune_point_markers", 10);
     nrmp_markers_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -469,8 +469,11 @@ class NeuPANNode : public rclcpp::Node {
     return path;
   }
 
+  // Latched, and sent again only when the path changes.
   void publishInitialPath() {
     const auto& path = planner_->ipath().initialPath();
+    if (samePoints(path, published_path_)) return;
+    published_path_ = path;
     nav_msgs::msg::Path msg;
     msg.header.frame_id = map_frame_;
     msg.header.stamp = now();
@@ -485,30 +488,36 @@ class NeuPANNode : public rclcpp::Node {
     ref_path_pub_->publish(msg);
   }
 
+  // One CUBE_LIST replaced every cycle, deleted when there are no points, so
+  // points from earlier cycles never linger in RViz.
   void publishPointMarkers(
       const neupan::Mat2X& points,
       const rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr&
           pub,
       int r, int g, int b) {
-    if (points.cols() == 0) return;
-    visualization_msgs::msg::MarkerArray arr;
-    for (Eigen::Index i = 0; i < points.cols(); ++i) {
-      visualization_msgs::msg::Marker m;
-      m.header.frame_id = map_frame_;
-      m.header.stamp = now();
-      m.id = static_cast<int>(i);
-      m.type = visualization_msgs::msg::Marker::CUBE;
+    visualization_msgs::msg::Marker m;
+    m.header.frame_id = map_frame_;
+    m.header.stamp = now();
+    m.id = 0;
+    if (points.cols() == 0) {
+      m.action = visualization_msgs::msg::Marker::DELETE;
+    } else {
+      m.type = visualization_msgs::msg::Marker::CUBE_LIST;
       m.scale.x = m.scale.y = m.scale.z = marker_size_;
       m.color.a = 1.0;
       m.color.r = r / 255.0f;
       m.color.g = g / 255.0f;
       m.color.b = b / 255.0f;
-      m.pose.position.x = points(0, i);
-      m.pose.position.y = points(1, i);
-      m.pose.position.z = 0.3;
       m.pose.orientation.w = 1.0;
-      arr.markers.push_back(m);
+      m.points.resize(points.cols());
+      for (Eigen::Index i = 0; i < points.cols(); ++i) {
+        m.points[i].x = points(0, i);
+        m.points[i].y = points(1, i);
+        m.points[i].z = 0.3;
+      }
     }
+    visualization_msgs::msg::MarkerArray arr;
+    arr.markers.push_back(std::move(m));
     pub->publish(arr);
   }
 
@@ -557,6 +566,7 @@ class NeuPANNode : public rclcpp::Node {
   bool scan_seen_ = false;
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
   std::vector<neupan::InitialPath::PathPoint> last_waypoints_;
+  std::vector<neupan::InitialPath::PathPoint> published_path_;
 
   neupan::Vec3 robot_state_ = neupan::Vec3::Zero();
   rclcpp::Time state_stamp_{0, 0, RCL_ROS_TIME};
