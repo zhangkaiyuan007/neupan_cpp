@@ -10,11 +10,10 @@ English version [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main
 > 全向已实现,与上游 Python 逐帧对齐,已在全向哨兵测试车上以 1.5 m/s 跑通。见 [项目状态与路线图](#项目状态与路线图)。
 
 <p align="center">
-  <a href="https://b23.tv/tUGI5hV">
-    <img src="https://i2.hdslb.com/bfs/archive/f82fd050b0d7d6c9e91261f04574e1d8f26d688e.jpg@308w_174h" alt="效果展示" width="400">
-  </a>
+  <a href="https://b23.tv/tUGI5hV"><img src="https://i2.hdslb.com/bfs/archive/f82fd050b0d7d6c9e91261f04574e1d8f26d688e.jpg@616w_348h" alt="效果展示(b 站)" height="200"></a>
+  <a href="docs/media/omni_sentry.mp4"><img src="docs/media/omni_sentry.gif" alt="全向哨兵测试车" height="200"></a>
 </p>
-<p align="center">效果展示</p>
+<p align="center">左:仿真演示(点击跳转 b 站) | 右:全向哨兵测试车实车运行(点击看原视频)</p>
 
 ## 快速开始
 

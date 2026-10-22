@@ -10,11 +10,10 @@ This repo consists of a standalone core library (`libneupan`) and a ROS 2 node (
 > Omnidirectional drive is implemented, matches upstream Python frame by frame, and runs on an omnidirectional sentry test car at 1.5 m/s. See [Project Status and Roadmap](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md#project-status-and-roadmap).
 
 <p align="center">
-  <a href="https://b23.tv/tUGI5hV">
-    <img src="https://i2.hdslb.com/bfs/archive/f82fd050b0d7d6c9e91261f04574e1d8f26d688e.jpg@308w_174h" alt="Video Demo(bilibili)" width="500">
-  </a>
+  <a href="https://b23.tv/tUGI5hV"><img src="https://i2.hdslb.com/bfs/archive/f82fd050b0d7d6c9e91261f04574e1d8f26d688e.jpg@616w_348h" alt="Video Demo (bilibili)" height="200"></a>
+  <a href="docs/media/omni_sentry.mp4"><img src="docs/media/omni_sentry.gif" alt="Omnidirectional sentry test car" height="200"></a>
 </p>
-<p align="center">Video Demo</p>
+<p align="center">Left: simulation demo (bilibili) | Right: on the omnidirectional sentry test car (click for the video)</p>
 
 ## Quick start
 
