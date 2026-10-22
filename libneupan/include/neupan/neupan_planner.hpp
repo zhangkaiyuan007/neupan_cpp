@@ -32,12 +32,14 @@ class NeuPANPlanner {
     double ref_speed = 4.0;
     double collision_threshold = 0.1;
 
-    // robot (diff rectangle)
+    // robot: a length x width rectangle unless vertices are given
+    Kinematics kinematics = Kinematics::Diff;
     Vec2 max_speed{8.0, 1.0};
     Vec2 max_acce{8.0, 3.0};
     double length = 1.6;
     double width = 2.0;
     double wheelbase = 0.0;
+    Mat2X vertices;  // (2, N) convex footprint in the robot frame
 
     InitialPath::Options ipath;
     PAN::Options pan;
@@ -73,7 +75,8 @@ class NeuPANPlanner {
   };
 
   // state: (3,1) x,y,theta; points: (2,N) global frame (N may be 0).
-  // Returns the action (2,1) and fills info.
+  // Returns the action (2,1), (v, w) for diff and the global-frame velocity
+  // (vx, vy) for omni, and fills info.
   Vec2 forward(const Vec3& state, const Mat2X& points, Info& info);
 
   void reset();

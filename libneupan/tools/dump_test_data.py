@@ -11,6 +11,8 @@ Produces:
                          outputs from a short corridor simulation
     replay_planner.yaml  line-style planner config shared with the C++ test
     replay.nptf          50-frame end-to-end (state, points, action) replay
+    replay_omni_planner.yaml, replay_omni.nptf
+                         the same replay with omni kinematics
 
 Part of neupan_cpp, a C++ port of NeuPAN (Copyright (c) 2025 Ruihua Han),
 distributed under the GNU General Public License v3 or later.
@@ -68,16 +70,20 @@ def replay_points(rng):
     return np.hstack([lower, upper, block1, block2])
 
 
-def dump_replay(out_dir):
+def dump_replay(out_dir, kinematics="diff"):
     import yaml as pyyaml
     from neupan import neupan
 
+    name = "replay" if kinematics == "diff" else f"replay_{kinematics}"
     with open("example/LON/planner.yaml") as f:
         cfg = pyyaml.safe_load(f)
     cfg["ipath"]["curve_style"] = "line"
     cfg["pan"]["dune_checkpoint"] = os.path.abspath(
         "example/model/diff_robot_default/model_5000.pth")
-    yaml_path = os.path.join(out_dir, "replay_planner.yaml")
+    if kinematics == "omni":  # as in example/*/omni: the direction of travel
+        cfg["robot"]["kinematics"] = "omni"  # may turn a full circle
+        cfg["robot"]["max_speed"] = [8, 6.28]
+    yaml_path = os.path.join(out_dir, f"{name}_planner.yaml")
     with open(yaml_path, "w") as f:
         pyyaml.safe_dump(cfg, f)
 
@@ -101,10 +107,11 @@ def dump_replay(out_dir):
         # full control sequence: lets the C++ test sync its cur_vel_array
         # for a strict open-loop, frame-by-frame comparison
         records.append((f"{pre}.opt_u", tn(info["vel_tensor"])))
-        state = diff_step(state, action, planner.dt)
+        step = omni_step if kinematics == "omni" else diff_step
+        state = step(state, action, planner.dt)
 
-    write_nptf(os.path.join(out_dir, "replay.nptf"), records)
-    print(f"dumped {N_REPLAY_FRAMES} replay frames -> replay.nptf")
+    write_nptf(os.path.join(out_dir, f"{name}.nptf"), records)
+    print(f"dumped {N_REPLAY_FRAMES} replay frames -> {name}.nptf")
 
 
 def diff_step(state, action, dt):
@@ -114,6 +121,11 @@ def diff_step(state, action, dt):
         [[x + v * cos(theta) * dt], [y + v * sin(theta) * dt],
          [theta + w * dt]]
     )
+
+
+def omni_step(state, action, dt):
+    vx, vy = action[0, 0], action[1, 0]
+    return state + dt * np.array([[vx], [vy], [0.0]])
 
 
 def main(out_dir):
@@ -204,6 +216,7 @@ def main(out_dir):
           f"-> {os.path.join(out_dir, 'frames.nptf')}")
 
     dump_replay(out_dir)
+    dump_replay(out_dir, "omni")
 
 
 if __name__ == "__main__":

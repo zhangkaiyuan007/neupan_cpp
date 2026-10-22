@@ -205,8 +205,16 @@ class NeuPANNode : public rclcpp::Node {
 
     geometry_msgs::msg::Twist twist;
     if (!info.stop && !info.arrive && !solverGaveUp(info)) {
-      twist.linear.x = action(0);
-      twist.angular.z = action(1);
+      if (planner_->robot().kinematics == neupan::Kinematics::Omni) {
+        // (vx, vy) in the map frame, turned into the base frame.
+        const double c = std::cos(robot_state_(2));
+        const double s = std::sin(robot_state_(2));
+        twist.linear.x = c * action(0) + s * action(1);
+        twist.linear.y = -s * action(0) + c * action(1);
+      } else {
+        twist.linear.x = action(0);
+        twist.angular.z = action(1);
+      }
     }
     vel_pub_->publish(twist);
     publishArrive(info.arrive);
@@ -248,8 +256,9 @@ class NeuPANNode : public rclcpp::Node {
 
   // Idling at the clearance in front of a blocked path sets neither stop nor arrive.
   void updateStall(const geometry_msgs::msg::Twist& cmd, bool arrived) {
-    const bool moving = std::abs(cmd.linear.x) > stall_speed_ ||
-                        std::abs(cmd.angular.z) > stall_speed_;
+    const bool moving =
+        std::hypot(cmd.linear.x, cmd.linear.y) > stall_speed_ ||
+        std::abs(cmd.angular.z) > stall_speed_;
     // First planned cycle starts the clock; the zero epoch would flag instantly.
     const bool first = last_progress_time_.nanoseconds() == 0;
     if (moving || arrived || first) {
@@ -502,12 +511,24 @@ class NeuPANNode : public rclcpp::Node {
     m.header.frame_id = map_frame_;
     m.header.stamp = now();
     m.id = 0;
-    m.type = visualization_msgs::msg::Marker::CUBE;
     m.color.a = 1.0;
     m.color.g = 1.0;
-    m.scale.x = cfg.length;
-    m.scale.y = cfg.width;
-    m.scale.z = marker_z_;
+    if (cfg.vertices.cols() > 0) {  // outline of the configured polygon
+      m.type = visualization_msgs::msg::Marker::LINE_STRIP;
+      m.scale.x = 0.03;
+      for (int i = 0; i <= cfg.vertices.cols(); ++i) {
+        geometry_msgs::msg::Point p;
+        p.x = cfg.vertices(0, i % cfg.vertices.cols());
+        p.y = cfg.vertices(1, i % cfg.vertices.cols());
+        p.z = marker_z_;
+        m.points.push_back(p);
+      }
+    } else {
+      m.type = visualization_msgs::msg::Marker::CUBE;
+      m.scale.x = cfg.length;
+      m.scale.y = cfg.width;
+      m.scale.z = marker_z_;
+    }
     m.pose.position.x = robot_state_(0);
     m.pose.position.y = robot_state_(1);
     m.pose.orientation = yawToQuat(robot_state_(2));

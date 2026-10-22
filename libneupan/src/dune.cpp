@@ -45,8 +45,8 @@ void checkCheckpointGeometry(const std::string& path, const TensorFile& tf,
     throw std::runtime_error(
         "dune: " + path +
         " was trained for a different robot footprint than the one "
-        "configured; distances would be wrong. Retrain or fix robot "
-        "length/width in the planner yaml.");
+        "configured; distances would be wrong. Retrain or fix the robot "
+        "footprint in the planner yaml.");
 }
 
 }  // namespace

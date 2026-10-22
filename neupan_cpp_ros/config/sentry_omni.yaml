@@ -1,0 +1,43 @@
+# mpc
+receding: 10
+step_time: 0.1
+ref_speed: 1.5
+collision_threshold: 0.05
+
+# robot
+robot:
+  kinematics: 'omni'
+  # speed [m/s] and direction of travel [rad]; the direction runs up to
+  # pi + receding * step_time * max_acce[1] before it is wrapped
+  max_speed: [2.0, 6.28]
+  max_acce: [3.0, 3.0]
+  # octagon round the spinning 0.417 m square chassis (it sweeps a 0.295 m
+  # circle), so the footprint does not depend on the chassis angle
+  vertices: [[0.296, 0.122], [0.122, 0.296], [-0.122, 0.296], [-0.296, 0.122],
+             [-0.296, -0.122], [-0.122, -0.296], [0.122, -0.296],
+             [0.296, -0.122]]
+
+# initial path
+ipath:
+  curve_style: 'line'
+  loop: False
+  arrive_threshold: 0.1
+  close_threshold: 0.1
+  ind_range: 10
+  arrive_index_threshold: 1
+
+pan:
+  iter_num: 2
+  dune_max_num: 100
+  nrmp_max_num: 10
+  iter_threshold: 0.1
+
+# adjust parameters
+adjust:
+  q_s: 1.0
+  p_u: 1.0
+  eta: 15.0
+  d_max: 0.3
+  d_min: 0.05
+  ro_obs: 10.0
+  bk: 0.0

@@ -7,7 +7,7 @@ English version [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main
 (`libneupan`)和一个 ROS 2 节点(`neupan_cpp_ros`)。
 
 > 差速 (矩形机器人 + 全局路径参考) 已实现并在仿真中验证。
-> 接下来将首先完成全向适配。见 [项目状态与路线图](#项目状态与路线图)。
+> 全向已实现,与上游 Python 逐帧对齐,尚未上车验证。见 [项目状态与路线图](#项目状态与路线图)。
 
 <p align="center">
   <a href="https://b23.tv/tUGI5hV">
@@ -60,11 +60,11 @@ DUNE 网络把机器人外形编码进了权重,所以**必须用你自己机器
 工具训练一次,再导出为本库读取的 `NPTF` 格式:
 
 ```bash
-python tools/export_dune_weights.py model_5000.pth your_robot.bin <length> <width> [wheelbase] [edge_dim]
+python tools/export_dune_weights.py model_5000.pth your_robot.bin your_planner.yaml
 ```
 
-`length`/`width` 填训练时的外形,不是当前机器人的尺寸。它们会写进权重文件,加载时与
-`planner.yaml` 的 `robot.length`/`robot.width` 比对,不一致即报错。
+外形取自 yaml 的 `robot` 段(`vertices`,或 `length`/`width`/`wheelbase`),要与训练时一致。
+它会写进权重文件,加载时与 `planner.yaml` 配置的外形比对,不一致即报错。
 
 ## 使用
 
@@ -83,7 +83,8 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | 输出 | `/neupan_diagnostics` | `diagnostic_msgs/DiagnosticArray`,求解状态、连续失败次数、最小距离、卡死标志 |
 | 输出 | `/neupan_plan`、`/neupan_initial_path`、`/dune_point_markers` … | 可视化 |
 
-规划器配置沿用 `planner.yaml` 的键名,但只支持 `kinematics: diff` 与 `curve_style: line`,
+规划器配置沿用 `planner.yaml` 的键名,支持 `kinematics: diff` 与 `omni`(外形可用 `vertices`
+给凸多边形),只支持 `curve_style: line`,
 `loop: true` 未移植。`d_min < 0`、`d_max < d_min`、`eta > 0` 而 `d_max <= 0`、
 `collision_threshold <= 0` 这几种组合会在加载时抛异常。主要调参:
 `collision_threshold`(硬急停距离)、`adjust.d_max` / `d_min`(贴障碍多近)、`ref_speed`、
@@ -162,8 +163,14 @@ DUNE 特意用 **float32** 运行以在数值上对齐 PyTorch。
 - ROS 2(Humble)节点,话题与上游 `neupan_ros` 兼容
 - 一个参考全局规划器( A\* → `/initial_path`)
 
+**已实现,与上游 Python 对齐,未上车:**
+- 全向(`omni`),凸多边形外形(`vertices`)。`/neupan_cmd_vel` 发 base 系下的
+  `linear.x/y`。与上游的一处不同:静止或背离路径的 nominal 会沿路径重新初始化
+  (见 `InitialPath::seedOmni`),否则从静止出发去身后的目标时上游会一直往前开
+
 **路线图(TODO):**
-- [ ] 其他运动学适配
+- [ ] 全向上车验证
+- [ ] 阿克曼适配
 - [ ] 待定
 
 ## 架构

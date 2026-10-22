@@ -81,9 +81,9 @@ Robot::Robot(Kinematics kinematics, int receding, double step_time,
   genInequalFromVertex(vertices, G, h);
 }
 
-Robot Robot::diffRectangle(int receding, double step_time, Vec2 max_speed,
-                           Vec2 max_acce, double length, double width,
-                           double wheelbase) {
+Robot Robot::rectangle(Kinematics kinematics, int receding, double step_time,
+                       Vec2 max_speed, Vec2 max_acce, double length,
+                       double width, double wheelbase) {
   const double sx = -(length - wheelbase) / 2.0;
   const double sy = -width / 2.0;
   Mat2X v(2, 4);
@@ -91,7 +91,7 @@ Robot Robot::diffRectangle(int receding, double step_time, Vec2 max_speed,
   v.col(1) << sx + length, sy;
   v.col(2) << sx + length, sy + width;
   v.col(3) << sx, sy + width;
-  return Robot(Kinematics::Diff, receding, step_time, std::move(max_speed),
+  return Robot(kinematics, receding, step_time, std::move(max_speed),
                std::move(max_acce), v);
 }
 
@@ -110,6 +110,15 @@ void Robot::linearize(const Vec3& nom_s_t, const Vec2& nom_u_t, Mat33& A,
           0, dt;
       C << phi * v * std::sin(phi) * dt, -phi * v * std::cos(phi) * dt, 0;
       break;
+    case Kinematics::Omni: {  // robot.linear_omni_model
+      const double psi = nom_u_t(1);
+      A.setIdentity();
+      B << std::cos(psi) * dt, -v * std::sin(psi) * dt,  //
+          std::sin(psi) * dt, v * std::cos(psi) * dt,    //
+          0, 0;
+      C << psi * v * std::sin(psi) * dt, -psi * v * std::cos(psi) * dt, 0;
+      break;
+    }
   }
 }
 

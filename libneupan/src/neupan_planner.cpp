@@ -14,6 +14,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <cmath>
 #include <stdexcept>
 
 namespace neupan {
@@ -21,8 +22,11 @@ namespace neupan {
 namespace {
 
 Robot makeRobot(const NeuPANPlanner::Config& c) {
-  return Robot::diffRectangle(c.receding, c.step_time, c.max_speed,
-                              c.max_acce, c.length, c.width, c.wheelbase);
+  if (c.vertices.cols() > 0)
+    return Robot(c.kinematics, c.receding, c.step_time, c.max_speed,
+                 c.max_acce, c.vertices);
+  return Robot::rectangle(c.kinematics, c.receding, c.step_time, c.max_speed,
+                          c.max_acce, c.length, c.width, c.wheelbase);
 }
 
 // cfg_ is the first member, so this runs before the robot and the blocks.
@@ -84,8 +88,12 @@ NeuPANPlanner NeuPANPlanner::fromYaml(const std::string& yaml_path,
 
   if (const auto r = y["robot"]) {
     const auto kin = r["kinematics"].as<std::string>("diff");
-    if (kin != "diff")
-      throw std::runtime_error("neupan_cpp currently supports only 'diff' "
+    if (kin == "diff")
+      c.kinematics = Kinematics::Diff;
+    else if (kin == "omni")
+      c.kinematics = Kinematics::Omni;
+    else
+      throw std::runtime_error("neupan_cpp supports 'diff' and 'omni' "
                                "kinematics (got '" + kin + "')");
     if (r["max_speed"]) {
       const auto v = r["max_speed"].as<std::vector<double>>();
@@ -98,6 +106,12 @@ NeuPANPlanner NeuPANPlanner::fromYaml(const std::string& yaml_path,
     c.length = r["length"].as<double>(c.length);
     c.width = r["width"].as<double>(c.width);
     c.wheelbase = r["wheelbase"].as<double>(0.0);
+    if (r["vertices"]) {
+      const auto v = r["vertices"].as<std::vector<std::vector<double>>>();
+      c.vertices.resize(2, static_cast<int>(v.size()));
+      for (size_t i = 0; i < v.size(); ++i)
+        c.vertices.col(static_cast<int>(i)) = Vec2(v[i].at(0), v[i].at(1));
+    }
   }
 
   if (const auto ip = y["ipath"]) {
@@ -185,9 +199,12 @@ Vec2 NeuPANPlanner::forward(const Vec3& state, const Mat2X& points,
   }
 
   // it only bounds a command that a degraded solve might otherwise let slip through to the robot.
-  return out.opt_u.col(0)
-      .cwiseMax(-robot_.max_speed)
-      .cwiseMin(robot_.max_speed);
+  const Vec2 u = out.opt_u.col(0)
+                     .cwiseMax(-robot_.max_speed)
+                     .cwiseMin(robot_.max_speed);
+  if (robot_.kinematics == Kinematics::Omni)
+    return Vec2(u(0) * std::cos(u(1)), u(0) * std::sin(u(1)));
+  return u;
 }
 
 void NeuPANPlanner::reset() {

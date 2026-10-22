@@ -7,7 +7,7 @@ Original Chinese [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/mai
 This repo consists of a standalone core library (`libneupan`) and a ROS 2 node (`neupan_cpp_ros`).
 
 > Differential drive (rectangular robot + global path reference) has been implemented and validated in simulation.
-> Omnidirectional drive adaptation is up next. See [Project Status and Roadmap](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md#project-status-and-roadmap).
+> Omnidirectional drive is implemented and matches upstream Python frame by frame, but has not been tested on a robot yet. See [Project Status and Roadmap](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md#project-status-and-roadmap).
 
 <p align="center">
   <a href="https://b23.tv/tUGI5hV">
@@ -57,10 +57,10 @@ source install/setup.bash
 The DUNE network encodes the robot's shape directly into its weights, so you must **train a model using your own robot's dimensions**. Train it once using the upstream Python tools, then export it to the `NPTF` format required by this repository:
 
 ```bash
-python tools/export_dune_weights.py model_5000.pth your_robot.bin <length> <width> [wheelbase] [edge_dim]
+python tools/export_dune_weights.py model_5000.pth your_robot.bin your_planner.yaml
 ```
 
-`length`/`width` are the footprint the checkpoint was trained for, not the robot's current size. They are stored in the file and checked against `robot.length`/`robot.width` from `planner.yaml` on load; a mismatch is an error.
+The footprint is taken from the yaml's `robot` section (`vertices`, or `length`/`width`/`wheelbase`) and must be the one the checkpoint was trained for. It is stored in the file and checked against the footprint configured in `planner.yaml` on load; a mismatch is an error.
 
 ## Usage
 
@@ -80,7 +80,7 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | Output    | `/neupan_diagnostics`                                        | `diagnostic_msgs/DiagnosticArray`, solve status, consecutive failures, min distance, stall flag |
 | Output    | `/neupan_plan`, `/neupan_initial_path`, `/dune_point_markers` … | Visualization                                         |
 
-The planner configuration keeps `planner.yaml`'s key names, but only `kinematics: diff` and `curve_style: line` are supported and `loop: true` is not ported. The combinations `d_min < 0`, `d_max < d_min`, `eta > 0` with `d_max <= 0`, and `collision_threshold <= 0` throw on load.
+The planner configuration keeps `planner.yaml`'s key names, supports `kinematics: diff` and `omni` (a convex polygon footprint can be given as `vertices`), only `curve_style: line` is supported, and `loop: true` is not ported. The combinations `d_min < 0`, `d_max < d_min`, `eta > 0` with `d_max <= 0`, and `collision_threshold <= 0` throw on load.
 
 Key tuning parameters: `collision_threshold` (hard emergency stop distance), `adjust.d_max` / `d_min` (how close it can get to obstacles), `ref_speed`, and `max_speed`.
 
@@ -156,9 +156,14 @@ DUNE explicitly runs in **float32** to numerically align with PyTorch.
 * ROS 2 (Humble) node, topics compatible with upstream `neupan_ros`
 * A reference global planner (A* → `/initial_path`)
 
+**Implemented, matches upstream Python, not yet tested on a robot:**
+
+* Omnidirectional drive (`omni`) with a convex polygon footprint (`vertices`). `/neupan_cmd_vel` carries `linear.x/y` in the base frame. One difference from upstream: a nominal that stands still or runs against the path is re-seeded along the path (see `InitialPath::seedOmni`); otherwise, starting from rest towards a goal behind it, upstream keeps driving forward.
+
 **Roadmap:**
 
-* [ ] Other kinematics adaptation
+* [ ] Omnidirectional drive on a robot
+* [ ] Ackermann adaptation
 * [ ] TBD
 
 ## Architecture

@@ -45,7 +45,7 @@ if(NEUPAN_BUILD_TESTS)
   enable_testing()
   find_package(GTest REQUIRED)
 
-  foreach(t test_dune test_nrmp test_replay)
+  foreach(t test_dune test_nrmp test_replay test_omni)
     add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE neupan GTest::gtest GTest::gtest_main)
     target_compile_definitions(${t} PRIVATE

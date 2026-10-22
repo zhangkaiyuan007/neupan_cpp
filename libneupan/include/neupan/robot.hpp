@@ -12,11 +12,16 @@
 
 #pragma once
 
+#include <utility>
+
 #include "neupan/types.hpp"
 
 namespace neupan {
 
-enum class Kinematics { Diff };  // v0.2: Omni, later: Acker
+// Diff: u = (v, w), body-frame speed and turn rate.
+// Omni: u = (v, psi), speed and direction of travel in the global frame; the
+// heading stays constant.
+enum class Kinematics { Diff, Omni };
 
 // Port of neupan/robot/robot.py: robot geometry (convex hull G x <= h),
 // velocity/acceleration bounds, and linearized kinematics.
@@ -26,9 +31,16 @@ class Robot {
         Vec2 max_acce, const Mat2X& vertices);
 
   // Rectangle footprint as in robot.cal_vertices_from_length_width.
+  static Robot rectangle(Kinematics kinematics, int receding,
+                         double step_time, Vec2 max_speed, Vec2 max_acce,
+                         double length, double width, double wheelbase = 0.0);
   static Robot diffRectangle(int receding, double step_time, Vec2 max_speed,
                              Vec2 max_acce, double length, double width,
-                             double wheelbase = 0.0);
+                             double wheelbase = 0.0) {
+    return rectangle(Kinematics::Diff, receding, step_time,
+                     std::move(max_speed), std::move(max_acce), length, width,
+                     wheelbase);
+  }
 
   // Linearized dynamics s_{t+1} = A s_t + B u_t + C around (nom_s_t, nom_u_t).
   void linearize(const Vec3& nom_s_t, const Vec2& nom_u_t, Mat33& A, Mat32& B,

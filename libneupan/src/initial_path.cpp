@@ -251,8 +251,24 @@ Vec3 InitialPath::motionPredict(const Vec3& state, const Vec2& vel) const {
       return state + dt_ * Vec3(vel(0) * std::cos(phi),
                                 vel(0) * std::sin(phi), vel(1));
     }
+    case Kinematics::Omni:  // omni_model
+      return state + dt_ * Vec3(vel(0) * std::cos(vel(1)),
+                                vel(0) * std::sin(vel(1)), 0.0);
   }
   return state;
+}
+
+Vec2 InitialPath::seedOmni(const Vec2& u, double path_dir, double ref_v,
+                           double prev_dir) const {
+  double v = u(0), dir = u(1);
+  if (v < 0.0) {  // the same motion, with a positive speed
+    v = -v;
+    dir += M_PI;
+  }
+  const bool still = v < 0.01 * robot_.max_speed(0);
+  if (still || std::cos(dir - path_dir) <= 0.0) dir = path_dir;
+  if (still) v = ref_v;
+  return Vec2(v, prev_dir + wrapToPi(dir - prev_dir));
 }
 
 InitialPath::NomRef InitialPath::generateNomRefState(
@@ -277,9 +293,6 @@ InitialPath::NomRef InitialPath::generateNomRefState(
   const double ref_speed_forward = ref_speed * dt_;
 
   for (int t = 0; t < T_; ++t) {
-    pre_state = motionPredict(pre_state, cur_vel_array.col(t));
-    out.nom_s.col(t + 1) = pre_state;
-
     if (ref_speed_forward >= interval_) {
       const int inc = static_cast<int>(ref_speed_forward / interval_);
       ref_index += inc;
@@ -293,6 +306,14 @@ InitialPath::NomRef InitialPath::generateNomRefState(
                                        ref_speed_forward);
       if (ref_index > n - 1) gear(t) = 0.0;
     }
+
+    if (robot_.kinematics == Kinematics::Omni)
+      out.nom_u.col(t) =
+          seedOmni(out.nom_u.col(t), ref_state(2), gear(t) * ref_speed,
+                   t > 0 ? out.nom_u(1, t - 1)
+                         : wrapToPi(cur_vel_array(1, 0)));
+    pre_state = motionPredict(pre_state, out.nom_u.col(t));
+    out.nom_s.col(t + 1) = pre_state;
 
     ref_state(2) = pre_state(2) + wrapToPi(ref_state(2) - pre_state(2));
     out.ref_s.col(t + 1) = ref_state;

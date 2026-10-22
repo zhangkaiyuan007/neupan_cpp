@@ -23,20 +23,19 @@ using namespace neupan;
 namespace {
 const std::string kData = NEUPAN_TEST_DATA_DIR;
 const std::string kModel = std::string(NEUPAN_MODEL_DIR) + "/diff_default.bin";
-}
 
 // End-to-end replay against the Python reference: feed the recorded state
 // sequence, compare actions. M2 acceptance: per-frame action inf-norm diff
 // < 5% of the velocity scale, mean frame time < 5 ms.
-TEST(Replay, EndToEndMatchesPython) {
-  const TensorFile tf = TensorFile::load(kData + "/replay.nptf");
+void replay(const std::string& name) {
+  const TensorFile tf = TensorFile::load(kData + "/" + name + ".nptf");
   const int n_frames = static_cast<int>(tf.at("meta.n_frames")(0, 0));
   const Mat2X points = tf.at("points");
 
   NeuPANPlanner planner =
-      NeuPANPlanner::fromYaml(kData + "/replay_planner.yaml", kModel);
+      NeuPANPlanner::fromYaml(kData + "/" + name + "_planner.yaml", kModel);
 
-  const double scale = planner.robot().max_speed.maxCoeff() / 2.0;  // 4.0
+  const double scale = planner.robot().max_speed(0) / 2.0;  // 4.0
 
   double max_action_diff = 0.0, sum_action_diff = 0.0;
   double total_us = 0.0, max_us = 0.0;
@@ -90,10 +89,17 @@ TEST(Replay, EndToEndMatchesPython) {
 
   const double mean_ms = total_us / n_frames / 1000.0;
   std::printf(
-      "replay: %d frames, action diff mean %.4f / max %.4f (%.1f%% of scale "
+      "%s: %d frames, action diff mean %.4f / max %.4f (%.1f%% of scale "
       "%.1f), %d outlier(s) >5%%, mean %.2f ms/frame, max %.2f ms\n",
-      n_frames, sum_action_diff / n_frames, max_action_diff,
+      name.c_str(), n_frames, sum_action_diff / n_frames, max_action_diff,
       100.0 * max_action_diff / scale, scale, outliers, mean_ms,
       max_us / 1000.0);
   EXPECT_LT(mean_ms, 5.0);  // M2 acceptance on the dev machine
 }
+
+}  // namespace
+
+TEST(Replay, EndToEndMatchesPython) { replay("replay"); }
+
+// Omni actions are global-frame (vx, vy).
+TEST(Replay, OmniMatchesPython) { replay("replay_omni"); }

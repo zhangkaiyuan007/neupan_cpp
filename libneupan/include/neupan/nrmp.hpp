@@ -91,6 +91,12 @@ class NRMP {
                 const Vec& ref_us, const std::vector<Mat>& fa_list,
                 const std::vector<Vec>& fb_list);
 
+  // Weight of state row r in the reference cost: the omni model leaves the
+  // heading out (robot.py builds C_state from x, y only).
+  double stateWeight(int r) const {
+    return r == 2 && robot_.kinematics == Kinematics::Omni ? 0.0 : p_.q_s(r);
+  }
+
   Robot robot_;
   NRMPParams p_;
   int T_, M_, nz_, nc_;

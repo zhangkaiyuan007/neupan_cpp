@@ -75,8 +75,6 @@ void NRMP::buildFaFb(const std::vector<Mat>& mu_list,
 void NRMP::assemble(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
                     const Vec& ref_us, const std::vector<Mat>& fa_list,
                     const std::vector<Vec>& fb_list) {
-  const Vec3& qs = p_.q_s;
-
   // ---- Hessian P (diagonal) and gradient q ----
   // cvxpy objective J(z) = z' Q z + c' z; OSQP form 0.5 z' P z + q' z with
   // P = 2 Q. Terms: ||q_s .* s - q_s .* ref_s||^2, ||p_u u_v - p_u ref_us||^2,
@@ -88,9 +86,10 @@ void NRMP::assemble(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
   for (int t = 0; t <= T_; ++t) {
     for (int r = 0; r < 3; ++r) {
       const int j = 3 * t + r;
-      pTrip.emplace_back(j, j, 2.0 * qs(r) * qs(r) + p_.bk);
-      const double gamma_a = qs(r) * ref_s(r, t);
-      q_(j) = -2.0 * qs(r) * gamma_a - p_.bk * nom_s(r, t);
+      const double w = stateWeight(r);
+      pTrip.emplace_back(j, j, 2.0 * w * w + p_.bk);
+      const double gamma_a = w * ref_s(r, t);
+      q_(j) = -2.0 * w * gamma_a - p_.bk * nom_s(r, t);
     }
   }
   for (int t = 0; t < T_; ++t) {
@@ -129,14 +128,12 @@ void NRMP::assemble(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
     robot_.linearize(nom_s.col(t), nom_u.col(t), A, B, C);
 
     for (int r = 0; r < 3; ++r) {
-      // Keep a fixed sparsity pattern: insert all entries that can ever be
-      // nonzero for the diff model, even when currently zero.
+      // Keep a fixed sparsity pattern: insert every entry that any model can
+      // make nonzero, even when it is zero now (OSQP is updated in place).
       aTrip.emplace_back(row, 3 * t + r, A(r, r));
       if (r < 2) aTrip.emplace_back(row, 3 * t + 2, A(r, 2));
-      if (r < 2)
-        aTrip.emplace_back(row, off_u_ + 2 * t, B(r, 0));
-      else
-        aTrip.emplace_back(row, off_u_ + 2 * t + 1, B(r, 1));
+      aTrip.emplace_back(row, off_u_ + 2 * t, B(r, 0));
+      aTrip.emplace_back(row, off_u_ + 2 * t + 1, B(r, 1));
       aTrip.emplace_back(row, 3 * (t + 1) + r, -1.0);
       lb_(row) = ub_(row) = -C(r);
       ++row;
@@ -254,7 +251,7 @@ double NRMP::objective(const Mat3X& s, const Mat2X& u, const Vec& d,
   double J = 0.0;
   for (int t = 0; t <= T_; ++t)
     for (int r = 0; r < 3; ++r) {
-      const double diff = p_.q_s(r) * s(r, t) - p_.q_s(r) * ref_s(r, t);
+      const double diff = stateWeight(r) * (s(r, t) - ref_s(r, t));
       J += diff * diff;
     }
   for (int t = 0; t < T_; ++t) {

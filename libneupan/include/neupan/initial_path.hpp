@@ -45,7 +45,7 @@ class InitialPath {
 
   struct NomRef {
     Mat3X nom_s;   // (3, T+1)
-    Mat2X nom_u;   // (2, T) == cur_vel_array
+    Mat2X nom_u;   // (2, T) cur_vel_array (omni: through seedOmni)
     Mat3X ref_s;   // (3, T+1)
     Vec ref_us;    // (T,)
   };
@@ -77,6 +77,17 @@ class InitialPath {
   Vec3 findInteractionPoint(const Vec3& ref_state, int& ref_index,
                             double length) const;
   Vec3 motionPredict(const Vec3& state, const Vec2& vel) const;
+  // Omni nominal step u = (v, direction). The linearized model only sees
+  // small turns of the direction of travel, and none at all at zero speed, so
+  // a nominal that stands still or runs against the path would never turn
+  // round (upstream then drives straight on). A still step is seeded moving
+  // along the path at ref_v, one running against it is turned along it.
+  // The direction is kept within half a turn of prev_dir, as the acceleration
+  // bound on it expects, and the first one within half a turn of zero: the
+  // direction is bounded by max_speed(1) like a speed, and upstream lets it
+  // pile up when the robot keeps turning the same way.
+  Vec2 seedOmni(const Vec2& u, double path_dir, double ref_v,
+                double prev_dir) const;
 
   const std::vector<PathPoint>& curCurve() const {
     return curve_list_[curve_index_];
