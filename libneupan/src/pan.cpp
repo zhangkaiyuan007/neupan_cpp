@@ -109,7 +109,8 @@ bool PAN::stopCriteria(const Mat3X& nom_s, const Mat2X& nom_u,
 }
 
 PAN::Output PAN::forward(Mat3X nom_s, Mat2X nom_u, const Mat3X& ref_s,
-                         const Vec& ref_us, const Mat2X& points) {
+                         const Vec& ref_us, const Mat2X& points,
+                         const std::optional<NRMP::Box>& first) {
   Output out;
   out.min_distance = std::numeric_limits<double>::infinity();
   // If the very first NRMP solve fails to converge we keep these 
@@ -137,7 +138,7 @@ PAN::Output PAN::forward(Mat3X nom_s, Mat2X nom_u, const Mat3X& ref_s,
     }
 
     const NRMP::Result res =
-        nrmp_.solve(nom_s, nom_u, ref_s, ref_us, fa_list, fb_list);
+        nrmp_.solve(nom_s, nom_u, ref_s, ref_us, fa_list, fb_list, first);
 
     out.solver_status = res.status;
 

@@ -48,9 +48,11 @@ class PAN {
     int solver_status = -1;  // raw OsqpEigen::Status of the last solve
   };
 
-  // points: (2, N) global frame, may be empty (0 cols).
+  // points: (2, N) global frame, may be empty (0 cols). first: bounds on the
+  // first input (NRMP::solve).
   Output forward(Mat3X nom_s, Mat2X nom_u, const Mat3X& ref_s,
-                 const Vec& ref_us, const Mat2X& points);
+                 const Vec& ref_us, const Mat2X& points,
+                 const std::optional<NRMP::Box>& first = std::nullopt);
 
   void reset() { prev_.reset(); }
   NRMP& nrmp() { return nrmp_; }

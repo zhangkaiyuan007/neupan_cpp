@@ -76,6 +76,7 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | Input     | `/initial_path`                                              | `nav_msgs/Path` (Global reference line)               |
 | Input     | `/neupan_goal`                                               | `geometry_msgs/PoseStamped` (Straight line reference) |
 | Input     | `/neupan_waypoints`                                          | `nav_msgs/Path` (Waypoint polyline)                   |
+| Input     | `/neupan_pause`                                              | `std_msgs/Bool`, true: hold still without planning (another controller is driving, say); planning resumes from rest |
 | Output    | `/neupan_cmd_vel`                                            | `geometry_msgs/Twist`, remapped to `/cmd_vel` in the launch file |
 | Output    | `/neupan_arrive`                                             | `std_msgs/Bool`, published every cycle, stays true after arrival until the path is replaced |
 | Output    | `/neupan_plan`                                               | `nav_msgs/Path`, the optimized trajectory, stamped from the current pose one `step_time` apart, empty when stopped; a trajectory tracker can follow it |
@@ -85,7 +86,7 @@ The planner configuration keeps `planner.yaml`'s key names, supports `kinematics
 
 Key tuning parameters: `collision_threshold` (hard emergency stop distance), `adjust.d_max` / `d_min` (how close it can get to obstacles), `ref_speed`, and `max_speed`.
 
-Node parameters: `config_file` and `dune_checkpoint` are required and throw when missing. `scan_timeout` defaults to 0.5 s, after which the obstacle points are cleared and the robot stops. `solver_fail_grace` defaults to 5 consecutive failed solves before stopping.
+Node parameters: `config_file` and `dune_checkpoint` are required and throw when missing. `scan_timeout` defaults to 0.5 s, after which the obstacle points are cleared and the robot stops. `solver_fail_grace` defaults to 5 consecutive failed solves before stopping. `lookahead` (default 0) is the delay before a command takes effect [s]: the plan starts where the last command will have taken the robot by then, and `/neupan_plan` is stamped that much later.
 
 ### Reference Global Planner (Optional)
 
@@ -160,6 +161,10 @@ DUNE explicitly runs in **float32** to numerically align with PyTorch.
 **Implemented, matches upstream Python, not yet tested on a robot:**
 
 * Omnidirectional drive (`omni`) with a convex polygon footprint (`vertices`). `/neupan_cmd_vel` carries `linear.x/y` in the base frame. One difference from upstream: a nominal that stands still or runs against the path is re-seeded along the path (see `InitialPath::seedOmni`); otherwise, starting from rest towards a goal behind it, upstream keeps driving forward.
+
+**Differences from upstream:**
+
+* The node passes the action it sent last and the time since to the planner (`NeuPANPlanner::Command`); the first input differs from it by at most `max_acce` times that time. Upstream bounds only consecutive inputs within one plan, so every replan may jump anywhere in the speed box (straight to `ref_speed` from rest, a sudden turn when the path changes), more than a chassis can follow. Calling `forward` without a `Command` behaves as upstream, which is what the parity tests do.
 
 **Roadmap:**
 

@@ -14,6 +14,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "neupan/initial_path.hpp"
@@ -74,10 +75,21 @@ class NeuPANPlanner {
     Mat2X nrmp_points;  // visualization: closest points in NRMP
   };
 
+  // What the robot is doing now: the last action it was given (zero once it
+  // was stopped) and the time since [s].
+  struct Command {
+    Vec2 action = Vec2::Zero();
+    double elapsed = 0.0;
+  };
+
   // state: (3,1) x,y,theta; points: (2,N) global frame (N may be 0).
   // Returns the action (2,1), (v, w) for diff and the global-frame velocity
   // (vx, vy) for omni, and fills info.
-  Vec2 forward(const Vec3& state, const Mat2X& points, Info& info);
+  // With a command, the action differs from it by at most max_acce * elapsed
+  // (elapsed up to one step). Upstream bounds only u_{t+1} - u_t within a
+  // plan, so without one every cycle may jump anywhere in the speed box.
+  Vec2 forward(const Vec3& state, const Mat2X& points, Info& info,
+               const std::optional<Command>& command = std::nullopt);
 
   void reset();
   void setReferenceSpeed(double speed) { ref_speed_ = speed; }
@@ -105,6 +117,8 @@ class NeuPANPlanner {
   const Robot& robot() const { return robot_; }
 
  private:
+  NRMP::Box firstInputBox(const Command& command, double nom_dir) const;
+
   Config cfg_;
   Robot robot_;
   InitialPath ipath_;

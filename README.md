@@ -79,6 +79,7 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | 输入 | `/initial_path` | `nav_msgs/Path`(全局参考线) |
 | 输入 | `/neupan_goal` | `geometry_msgs/PoseStamped`(直线参考) |
 | 输入 | `/neupan_waypoints` | `nav_msgs/Path`(航点折线) |
+| 输入 | `/neupan_pause` | `std_msgs/Bool`,true 时停车不规划(比如别的控制器在开车),恢复后从静止起步 |
 | 输出 | `/neupan_cmd_vel` | `geometry_msgs/Twist`,launch 里 remap 为 `/cmd_vel` |
 | 输出 | `/neupan_arrive` | `std_msgs/Bool`,每周期发布,到点后保持 true 直到换路径 |
 | 输出 | `/neupan_plan` | `nav_msgs/Path`,优化出的轨迹,时间戳从当前位姿起每个 `step_time` 一格,停车时为空,可直接给轨迹跟踪器 |
@@ -93,6 +94,8 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 
 节点参数:`config_file` 与 `dune_checkpoint` 必填,缺失即抛异常。`scan_timeout` 默认
 0.5 s,超时后清空障碍点并停车。`solver_fail_grace` 默认 5,连续求解失败超过此数即停车。
+`lookahead` 默认 0:命令从发出到生效的延迟 [s],规划从上一帧命令把车带到的位置出发,
+`/neupan_plan` 的时间戳相应后移。
 
 ### 一个参考全局规划器(可选)
 
@@ -167,6 +170,12 @@ DUNE 特意用 **float32** 运行以在数值上对齐 PyTorch。
 - 全向(`omni`),凸多边形外形(`vertices`)。`/neupan_cmd_vel` 发 base 系下的
   `linear.x/y`。与上游的一处不同:静止或背离路径的 nominal 会沿路径重新初始化
   (见 `InitialPath::seedOmni`),否则从静止出发去身后的目标时上游会一直往前开
+
+**与上游的不同:**
+- 节点把上一帧发出的动作和距今的时间传给规划器(`NeuPANPlanner::Command`),
+  第一步输入相对它的变化不超过 `max_acce` × 该时间。上游只约束一条规划内相邻两步,
+  每帧重规划都可能跳到速度框内任意值(起步直接给到 `ref_speed`、换路时速度方向突变),
+  底盘跟不上。直接调 `forward` 不传 `Command` 时与上游一致,对齐测试即如此
 
 **路线图(TODO):**
 - [ ] 全向上车验证

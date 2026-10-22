@@ -14,6 +14,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -150,7 +151,7 @@ NeuPANPlanner NeuPANPlanner::fromYaml(const std::string& yaml_path,
 }
 
 Vec2 NeuPANPlanner::forward(const Vec3& state, const Mat2X& points,
-                            Info& info) {
+                            Info& info, const std::optional<Command>& command) {
   info = Info{};
 
   if (ipath_.checkArrive(state)) {
@@ -161,8 +162,10 @@ Vec2 NeuPANPlanner::forward(const Vec3& state, const Mat2X& points,
   const InitialPath::NomRef nom =
       ipath_.generateNomRefState(state, cur_vel_array_, ref_speed_);
 
-  const PAN::Output out =
-      pan_.forward(nom.nom_s, nom.nom_u, nom.ref_s, nom.ref_us, points);
+  std::optional<NRMP::Box> first;
+  if (command) first = firstInputBox(*command, nom.nom_u(1, 0));
+  const PAN::Output out = pan_.forward(nom.nom_s, nom.nom_u, nom.ref_s,
+                                       nom.ref_us, points, first);
 
   cur_vel_array_ = out.opt_u;
 
@@ -188,6 +191,27 @@ Vec2 NeuPANPlanner::forward(const Vec3& state, const Mat2X& points,
   if (robot_.kinematics == Kinematics::Omni)
     return Vec2(u(0) * std::cos(u(1)), u(0) * std::sin(u(1)));
   return u;
+}
+
+NRMP::Box NeuPANPlanner::firstInputBox(const Command& command,
+                                       double nom_dir) const {
+  const Vec2 b = robot_.acce_bound *
+                 std::clamp(command.elapsed / robot_.dt, 0.0, 1.0);
+  const Vec2& a = command.action;
+  if (robot_.kinematics != Kinematics::Omni)
+    return {(a - b).cwiseMax(-robot_.max_speed),
+            (a + b).cwiseMin(robot_.max_speed)};
+
+  // The omni input is (speed, direction): bound it round the disk of
+  // velocities within b(0) of the action, with the direction taken on the
+  // nominal's side of the wrap. Slower than b(0), any direction will do.
+  const double speed = a.norm();
+  if (speed <= b(0))
+    return {Vec2(-b(0), -robot_.max_speed(1)), Vec2(b(0), robot_.max_speed(1))};
+  const double dir = nom_dir + wrapToPi(std::atan2(a.y(), a.x()) - nom_dir);
+  const double half = std::asin(b(0) / speed);
+  return {Vec2(speed - b(0), dir - half),
+          Vec2(std::min(speed + b(0), robot_.max_speed(0)), dir + half)};
 }
 
 void NeuPANPlanner::reset() {

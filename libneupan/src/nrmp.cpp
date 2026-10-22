@@ -74,7 +74,8 @@ void NRMP::buildFaFb(const std::vector<Mat>& mu_list,
 
 void NRMP::assemble(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
                     const Vec& ref_us, const std::vector<Mat>& fa_list,
-                    const std::vector<Vec>& fb_list) {
+                    const std::vector<Vec>& fb_list,
+                    const std::optional<Box>& first) {
   // ---- Hessian P (diagonal) and gradient q ----
   // cvxpy objective J(z) = z' Q z + c' z; OSQP form 0.5 z' P z + q' z with
   // P = 2 Q. Terms: ||q_s .* s - q_s .* ref_s||^2, ||p_u u_v - p_u ref_us||^2,
@@ -140,12 +141,12 @@ void NRMP::assemble(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
     }
   }
 
-  // speed box: |u| <= max_speed
+  // speed box: |u| <= max_speed, or the given box for the first input
   for (int t = 0; t < T_; ++t) {
     for (int r = 0; r < 2; ++r) {
       aTrip.emplace_back(row, off_u_ + 2 * t + r, 1.0);
-      lb_(row) = -robot_.max_speed(r);
-      ub_(row) = robot_.max_speed(r);
+      lb_(row) = t == 0 && first ? first->lo(r) : -robot_.max_speed(r);
+      ub_(row) = t == 0 && first ? first->hi(r) : robot_.max_speed(r);
       ++row;
     }
   }
@@ -202,8 +203,9 @@ void NRMP::assemble(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
 NRMP::Result NRMP::solve(const Mat3X& nom_s, const Mat2X& nom_u,
                          const Mat3X& ref_s, const Vec& ref_us,
                          const std::vector<Mat>& fa_list,
-                         const std::vector<Vec>& fb_list) {
-  assemble(nom_s, nom_u, ref_s, ref_us, fa_list, fb_list);
+                         const std::vector<Vec>& fb_list,
+                         const std::optional<Box>& first) {
+  assemble(nom_s, nom_u, ref_s, ref_us, fa_list, fb_list, first);
 
   if (!initialized_) {
     solver_ = std::make_unique<OsqpEigen::Solver>();

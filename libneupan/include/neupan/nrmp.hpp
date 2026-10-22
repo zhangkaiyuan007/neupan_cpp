@@ -15,6 +15,7 @@
 #include <OsqpEigen/OsqpEigen.h>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "neupan/robot.hpp"
@@ -59,11 +60,17 @@ class NRMP {
     int status = -1;  // raw OsqpEigen::Status value, for diagnostics
   };
 
+  // Bounds on the first input, in place of the speed box at t = 0.
+  struct Box {
+    Vec2 lo, hi;
+  };
+
   // fa_list: T of (max_num, 2); fb_list: T of (max_num,). Pass empty lists
   // for the no-point case (equivalent to zero fa/fb upstream).
   Result solve(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
                const Vec& ref_us, const std::vector<Mat>& fa_list,
-               const std::vector<Vec>& fb_list);
+               const std::vector<Vec>& fb_list,
+               const std::optional<Box>& first = std::nullopt);
 
   // Port of generate_coefficient_parameter_value: build fa/fb for stages
   // 1..T from the DUNE outputs (mu/lam/points are distance-sorted, the
@@ -89,7 +96,8 @@ class NRMP {
  private:
   void assemble(const Mat3X& nom_s, const Mat2X& nom_u, const Mat3X& ref_s,
                 const Vec& ref_us, const std::vector<Mat>& fa_list,
-                const std::vector<Vec>& fb_list);
+                const std::vector<Vec>& fb_list,
+                const std::optional<Box>& first);
 
   // Weight of state row r in the reference cost: the omni model leaves the
   // heading out (robot.py builds C_state from x, y only).

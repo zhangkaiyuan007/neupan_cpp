@@ -73,6 +73,7 @@ class NeuPANNode : public rclcpp::Node {
         declare_parameter<bool>("include_initial_path_direction", false);
     scan_timeout_ = declare_parameter<double>("scan_timeout", 0.5);
     solver_fail_grace_ = declare_parameter<int>("solver_fail_grace", 5);
+    lookahead_ = declare_parameter<double>("lookahead", 0.0);
     const double rate = declare_parameter<double>("control_rate", 50.0);
 
     if (scan_downsample_ < 1)
@@ -119,6 +120,11 @@ class NeuPANNode : public rclcpp::Node {
         "/initial_path", 10, [this](nav_msgs::msg::Path::ConstSharedPtr msg) {
           pathCallback(*msg);
         });
+    pause_sub_ = create_subscription<std_msgs::msg::Bool>(
+        "/neupan_pause", rclcpp::QoS(1).transient_local(),
+        [this](std_msgs::msg::Bool::ConstSharedPtr msg) {
+          paused_ = msg->data;
+        });
     waypoints_sub_ = create_subscription<nav_msgs::msg::Path>(
         "/neupan_waypoints", 10,
         [this](nav_msgs::msg::Path::ConstSharedPtr msg) {
@@ -161,7 +167,9 @@ class NeuPANNode : public rclcpp::Node {
     vel_pub_->publish(geometry_msgs::msg::Twist());
     plan_pub_->publish(matToPath(neupan::Mat3X(3, 0)));
     publishArrive(false);
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "%s", why);
+    command_ = {};
+    command_time_ = get_clock()->now();
+    if (why) RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "%s", why);
   }
 
   void run() {
@@ -172,6 +180,13 @@ class NeuPANNode : public rclcpp::Node {
     }
     robot_state_ = *state;
     have_state_ = true;
+
+    // Something else drives the robot, or nothing does: the next plan starts
+    // from rest.
+    if (paused_) {
+      halt(nullptr);
+      return;
+    }
 
     if (scanIsStale()) {
       obstacle_points_.resize(2, 0);
@@ -195,9 +210,15 @@ class NeuPANNode : public rclcpp::Node {
           get_logger(), *get_clock(), 1000,
           "no obstacle points, only path tracking will be performed");
 
+    // The plan starts from the last command, so the robot is never asked for
+    // more than max_acce, and from where that command will have taken the
+    // robot after lookahead, when a new one takes effect.
+    const rclcpp::Time now = get_clock()->now();
+    command_.elapsed = (now - command_time_).seconds();
     neupan::NeuPANPlanner::Info info;
-    const neupan::Vec2 action =
-        planner_->forward(robot_state_, obstacle_points_, info);
+    const neupan::Vec2 action = planner_->forward(
+        predict(robot_state_, command_.action, lookahead_), obstacle_points_,
+        info, command_);
 
     if (info.arrive)
       RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
@@ -223,6 +244,8 @@ class NeuPANNode : public rclcpp::Node {
     }
     vel_pub_->publish(twist);
     publishArrive(info.arrive);
+    command_.action = moving ? action : neupan::Vec2::Zero();
+    command_time_ = now;
 
     // A follower may track the plan instead of the twist, so it is empty when stopped.
     plan_pub_->publish(matToPath(moving ? info.opt_s : neupan::Mat3X(3, 0)));
@@ -416,16 +439,28 @@ class NeuPANNode : public rclcpp::Node {
     planner_->reset();
   }
 
-  // Stamped from the pose the plan starts at, one step_time per state.
+  // The state the action moves the robot to after t seconds.
+  neupan::Vec3 predict(const neupan::Vec3& s, const neupan::Vec2& action,
+                       double t) const {
+    if (planner_->robot().kinematics == neupan::Kinematics::Omni)
+      return {s(0) + action(0) * t, s(1) + action(1) * t, s(2)};
+    return {s(0) + action(0) * std::cos(s(2)) * t,
+            s(1) + action(0) * std::sin(s(2)) * t, s(2) + action(1) * t};
+  }
+
+  // Stamped from the pose the plan starts at, lookahead after the pose read
+  // from TF, one step_time per state.
   nav_msgs::msg::Path matToPath(const neupan::Mat3X& states) {
+    const rclcpp::Time start =
+        state_stamp_ + rclcpp::Duration::from_seconds(lookahead_);
     nav_msgs::msg::Path path;
     path.header.frame_id = map_frame_;
-    path.header.stamp = state_stamp_;
+    path.header.stamp = start;
     for (Eigen::Index i = 0; i < states.cols(); ++i) {
       geometry_msgs::msg::PoseStamped ps;
       ps.header.frame_id = map_frame_;
       ps.header.stamp =
-          state_stamp_ + rclcpp::Duration::from_seconds(i * planner_->robot().dt);
+          start + rclcpp::Duration::from_seconds(i * planner_->robot().dt);
       ps.pose.position.x = states(0, i);
       ps.pose.position.y = states(1, i);
       ps.pose.orientation = yawToQuat(states(2, i));
@@ -516,6 +551,7 @@ class NeuPANNode : public rclcpp::Node {
   bool flip_angle_, include_initial_path_direction_;
   double scan_timeout_;
   int solver_fail_grace_;
+  double lookahead_;
 
   int consecutive_unsolved_ = 0;
   bool scan_seen_ = false;
@@ -524,7 +560,10 @@ class NeuPANNode : public rclcpp::Node {
 
   neupan::Vec3 robot_state_ = neupan::Vec3::Zero();
   rclcpp::Time state_stamp_{0, 0, RCL_ROS_TIME};
+  neupan::NeuPANPlanner::Command command_;
+  rclcpp::Time command_time_{0, 0, RCL_ROS_TIME};
   bool have_state_ = false;
+  bool paused_ = false;
   neupan::Mat2X obstacle_points_ = neupan::Mat2X(2, 0);
 
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -544,6 +583,7 @@ class NeuPANNode : public rclcpp::Node {
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_,
       waypoints_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr pause_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
