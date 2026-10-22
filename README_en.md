@@ -13,12 +13,12 @@ This repo consists of a standalone core library (`libneupan`) and a ROS 2 node (
 <table>
   <tr>
     <td align="center">
-      <a href="https://b23.tv/tUGI5hV"><img src="https://i2.hdslb.com/bfs/archive/f82fd050b0d7d6c9e91261f04574e1d8f26d688e.jpg@616w_348h" alt="Simulation demo (bilibili)" height="200"></a>
-      <br>Simulation demo (bilibili)
+      <a href="https://b23.tv/tUGI5hV"><img src="https://i2.hdslb.com/bfs/archive/f82fd050b0d7d6c9e91261f04574e1d8f26d688e.jpg@616w_348h" alt="Simulation demo" height="200"></a>
+      <br>Simulation demo
     </td>
     <td align="center">
       <a href="docs/media/omni_sentry.mp4"><img src="docs/media/omni_sentry.gif" alt="Omnidirectional sentry test car" height="200"></a>
-      <br>On the omnidirectional sentry test car (click for the video)
+      <br>On the omnidirectional sentry test car
     </td>
   </tr>
 </table>
