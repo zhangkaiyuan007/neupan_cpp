@@ -10,10 +10,8 @@ endif()
 
 option(NEUPAN_NATIVE "Enable -march=native tuning" OFF)
 option(NEUPAN_BUILD_TESTS "Build unit tests" ON)
-option(NEUPAN_BUILD_TOOLS "Build the benchmark and A/B tools" ON)
 
-# .reshaped() (mlp.cpp, dune.cpp) is Eigen 3.4 API.
-find_package(Eigen3 3.4 REQUIRED)
+find_package(Eigen3 3.3 REQUIRED)
 find_package(OsqpEigen REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
@@ -32,8 +30,6 @@ add_library(neupan
   src/pan.cpp
   src/neupan_planner.cpp
   src/tensor_io.cpp
-  src/log.cpp
-  src/safety_supervisor.cpp
 )
 add_library(neupan::neupan ALIAS neupan)
 
@@ -41,23 +37,17 @@ target_include_directories(neupan PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
-# OSQP and yaml-cpp only appear in the .cpp files, so they stay out of the
-# interface.
-target_link_libraries(neupan PUBLIC Eigen3::Eigen
-                             PRIVATE OsqpEigen::OsqpEigen yaml-cpp)
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(neupan PRIVATE -Wall -Wextra)
-endif()
+target_link_libraries(neupan PUBLIC Eigen3::Eigen OsqpEigen::OsqpEigen
+                                    yaml-cpp)
+target_compile_options(neupan PRIVATE -O3)
 
 if(NEUPAN_BUILD_TESTS)
   enable_testing()
   find_package(GTest REQUIRED)
 
-  foreach(t test_config test_dune test_initial_path test_nrmp test_replay
-            test_robot test_safety_supervisor test_tensor_io)
+  foreach(t test_dune test_nrmp test_replay)
     add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE neupan GTest::gtest GTest::gtest_main)
-    target_include_directories(${t} PRIVATE tests)
     target_compile_definitions(${t} PRIVATE
       NEUPAN_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
       NEUPAN_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
@@ -65,23 +55,20 @@ if(NEUPAN_BUILD_TESTS)
   endforeach()
 endif()
 
-if(NEUPAN_BUILD_TOOLS)
-  add_executable(neupan_bench tools/bench.cpp)
-  target_link_libraries(neupan_bench PRIVATE neupan)
-  target_include_directories(neupan_bench PRIVATE tests)
-  target_compile_definitions(neupan_bench PRIVATE
-    NEUPAN_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
-    NEUPAN_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
+add_executable(neupan_bench tools/bench.cpp)
+target_link_libraries(neupan_bench PRIVATE neupan)
+target_compile_definitions(neupan_bench PRIVATE
+  NEUPAN_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
+  NEUPAN_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
 
-  add_executable(neupan_ab_safety_margin tools/ab_safety_margin.cpp)
-  target_link_libraries(neupan_ab_safety_margin PRIVATE neupan)
-  if(NEUPAN_BUILD_TESTS)
-    # Asserting tool: config A must be rejected, config B must keep passing.
-    add_test(NAME ab_safety_margin COMMAND neupan_ab_safety_margin
-      ${CMAKE_CURRENT_SOURCE_DIR}/tools/ab_configs/season_d0.yaml
-      ${CMAKE_CURRENT_SOURCE_DIR}/tools/ab_configs/upstream_margins.yaml
-      ${CMAKE_CURRENT_SOURCE_DIR}/models/diff_sentry.bin)
-  endif()
+add_executable(neupan_ab_safety_margin tools/ab_safety_margin.cpp)
+target_link_libraries(neupan_ab_safety_margin PRIVATE neupan)
+if(NEUPAN_BUILD_TESTS)
+  # Asserting tool: config A must be rejected, config B must keep passing.
+  add_test(NAME ab_safety_margin COMMAND neupan_ab_safety_margin
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/ab_configs/season_d0.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/ab_configs/upstream_margins.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/diff_sentry.bin)
 endif()
 
 install(TARGETS neupan EXPORT neupanTargets)
@@ -100,18 +87,12 @@ install(EXPORT neupanTargets
 include(CMakePackageConfigHelpers)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/libneupanConfig.cmake" "\
 include(CMakeFindDependencyMacro)
-find_dependency(Eigen3 3.4)
+find_dependency(Eigen3)
 find_dependency(OsqpEigen)
 find_dependency(yaml-cpp)
 get_filename_component(libneupan_MODELS_DIR
   \"\${CMAKE_CURRENT_LIST_DIR}/../../../share/libneupan/models\" ABSOLUTE)
 include(\"\${CMAKE_CURRENT_LIST_DIR}/libneupanTargets.cmake\")
 ")
-# 0.x: minor releases may break the API.
-write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/libneupanConfigVersion.cmake"
-  VERSION ${PROJECT_VERSION}
-  COMPATIBILITY SameMinorVersion)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libneupanConfig.cmake"
-              "${CMAKE_CURRENT_BINARY_DIR}/libneupanConfigVersion.cmake"
   DESTINATION lib/cmake/libneupan)

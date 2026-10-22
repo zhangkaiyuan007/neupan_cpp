@@ -15,21 +15,23 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
-#include <string>
-#include <utility>
 
 namespace neupan {
 
-InitialPath::InitialPath(std::shared_ptr<const Robot> robot, double ref_speed,
+double wrapToPi(double rad) {
+  while (rad > M_PI) rad -= 2.0 * M_PI;
+  while (rad < -M_PI) rad += 2.0 * M_PI;
+  return rad;
+}
+
+InitialPath::InitialPath(const Robot& robot, double ref_speed,
                          const Options& opts)
-    : robot_(std::move(robot)), opts_(opts) {
-  interval_ = opts.interval > 0.0 ? opts.interval : robot_->dt * ref_speed;
-  // generateLineCurve steps by interval_; zero or negative never terminates.
-  if (!(interval_ > 0.0))
-    throw std::invalid_argument(
-        "initial_path: path interval must be > 0 (interval " +
-        std::to_string(opts.interval) + ", ref_speed " +
-        std::to_string(ref_speed) + ")");
+    : robot_(robot),
+      T_(robot.T),
+      dt_(robot.dt),
+      ref_speed_(ref_speed),
+      opts_(opts) {
+  interval_ = opts.interval > 0.0 ? opts.interval : dt_ * ref_speed_;
   if (!opts_.waypoints.empty() && opts_.loop)
     throw std::runtime_error("initial_path: loop mode is not ported yet");
 }
@@ -39,7 +41,8 @@ std::vector<InitialPath::PathPoint> InitialPath::generateLineCurve(
   // Port of gctl curve_generator.generate_line + curve_from_waypoints
   // followed by initial_path._ensure_consistent_angles.
   std::vector<PathPoint> curve;
-  curve.emplace_back(waypoints[0].x(), waypoints[0].y(), waypoints[0].z(), 1.0);
+  curve.emplace_back(waypoints[0].x(), waypoints[0].y(), waypoints[0].z(),
+                     1.0);
 
   for (size_t i = 0; i + 1 < waypoints.size(); ++i) {
     const Vec2 sp = waypoints[i].head<2>();
@@ -66,8 +69,7 @@ std::vector<InitialPath::PathPoint> InitialPath::generateLineCurve(
     const double dy = curve[i + 1].y() - curve[i].y();
     curve[i](2) = std::atan2(dy, dx);
   }
-  if (curve.size() >= 2)
-    curve[curve.size() - 1](2) = curve[curve.size() - 2](2);
+  if (curve.size() >= 2) curve[curve.size() - 1](2) = curve[curve.size() - 2](2);
 
   return curve;
 }
@@ -75,8 +77,8 @@ std::vector<InitialPath::PathPoint> InitialPath::generateLineCurve(
 void InitialPath::setPath(std::vector<PathPoint> path) {
   initial_path_ = std::move(path);
   splitPathWithGear();
-  ++revision_;
-  reset();
+  curve_index_ = 0;
+  point_index_ = 0;
 }
 
 void InitialPath::splitPathWithGear() {
@@ -107,8 +109,7 @@ void InitialPath::setInitialPath(std::vector<PathPoint> path) {
   if (path.size() < 2)
     throw std::invalid_argument(
         "initial_path: an external path needs at least 2 points");
-  // Densify to interval_ exactly like generated paths: the reference
-  // advance in generateNomRefState assumes that spacing.
+  // Densify the external path to interval_, exactly like generateLineCurve. 
   std::vector<Vec3> waypoints;
   waypoints.reserve(path.size());
   for (const auto& p : path) waypoints.emplace_back(p.head<3>());
@@ -149,21 +150,23 @@ void InitialPath::reset() {
   arrive_flag_ = false;
 }
 
-void InitialPath::advanceToClosestPoint(const Vec3& state) {
+double InitialPath::closestPoint(const Vec3& state, double threshold,
+                                 int ind_range) {
   double min_dis = std::numeric_limits<double>::infinity();
   const auto& curve = curCurve();
   const int start = std::max(point_index_, 0);
-  const int end = std::min<int>(point_index_ + opts_.ind_range,
-                                static_cast<int>(curve.size()));
+  const int end =
+      std::min<int>(point_index_ + ind_range, static_cast<int>(curve.size()));
 
   for (int i = start; i < end; ++i) {
     const double dis = (state.head<2>() - curve[i].head<2>()).norm();
     if (dis < min_dis) {
       min_dis = dis;
       point_index_ = i;
-      if (dis < opts_.close_threshold) break;
+      if (dis < threshold) break;
     }
   }
+  return min_dis;
 }
 
 bool InitialPath::checkCurveArrive(const Vec3& state) const {
@@ -171,15 +174,15 @@ bool InitialPath::checkCurveArrive(const Vec3& state) const {
   const double arrive_distance =
       (state.head<2>() - curve.back().head<2>()).norm();
   return arrive_distance < opts_.arrive_threshold &&
-         point_index_ >=
-             static_cast<int>(curve.size()) - opts_.arrive_index_threshold - 2;
+         point_index_ >= static_cast<int>(curve.size()) -
+                             opts_.arrive_index_threshold - 2;
 }
 
 bool InitialPath::checkArrive(const Vec3& state) {
   if (!hasPath()) setIpathWithState(state);
-  // Latched: recomputing flickers off once the robot settles past the end.
+  // Latch: recomputing every cycle flickers off when the robot settles past the end.
   if (arrive_flag_) return true;
-  advanceToClosestPoint(state);
+  closestPoint(state, opts_.close_threshold, opts_.ind_range);
 
   if (checkCurveArrive(state)) {
     if (curve_index_ + 1 >= static_cast<int>(curve_list_.size())) {
@@ -241,31 +244,40 @@ Vec3 InitialPath::findInteractionPoint(const Vec3& ref_state, int& ref_index,
   }
 }
 
-NomRef InitialPath::generateNomRefState(const Vec3& state,
-                                        const Mat2X& cur_vel_array,
-                                        double ref_speed) const {
+Vec3 InitialPath::motionPredict(const Vec3& state, const Vec2& vel) const {
+  switch (robot_.kinematics) {
+    case Kinematics::Diff: {
+      const double phi = state(2);
+      return state + dt_ * Vec3(vel(0) * std::cos(phi),
+                                vel(0) * std::sin(phi), vel(1));
+    }
+  }
+  return state;
+}
+
+InitialPath::NomRef InitialPath::generateNomRefState(
+    const Vec3& state, const Mat2X& cur_vel_array, double ref_speed) const {
   const auto& curve = curCurve();
   const int n = static_cast<int>(curve.size());
-  const int T = robot_->T;
 
   Vec3 ref_state = curve[point_index_].head<3>();
   int ref_index = point_index_;
   Vec3 pre_state = state;
 
   NomRef out;
-  out.nom_s.resize(3, T + 1);
-  out.ref_s.resize(3, T + 1);
+  out.nom_s.resize(3, T_ + 1);
+  out.ref_s.resize(3, T_ + 1);
   out.nom_u = cur_vel_array;
-  out.ref_us.resize(T);
+  out.ref_us.resize(T_);
 
   out.nom_s.col(0) = pre_state;
   out.ref_s.col(0) = ref_state;
 
-  Vec gear = Vec::Constant(T, curve[point_index_](3));
-  const double ref_speed_forward = ref_speed * robot_->dt;
+  Vec gear = Vec::Constant(T_, curve[point_index_](3));
+  const double ref_speed_forward = ref_speed * dt_;
 
-  for (int t = 0; t < T; ++t) {
-    pre_state = robot_->propagate(pre_state, cur_vel_array.col(t));
+  for (int t = 0; t < T_; ++t) {
+    pre_state = motionPredict(pre_state, cur_vel_array.col(t));
     out.nom_s.col(t + 1) = pre_state;
 
     if (ref_speed_forward >= interval_) {
@@ -277,7 +289,8 @@ NomRef InitialPath::generateNomRefState(const Vec3& state,
       }
       ref_state = curve[ref_index].head<3>();
     } else {
-      ref_state = findInteractionPoint(ref_state, ref_index, ref_speed_forward);
+      ref_state = findInteractionPoint(ref_state, ref_index,
+                                       ref_speed_forward);
       if (ref_index > n - 1) gear(t) = 0.0;
     }
 

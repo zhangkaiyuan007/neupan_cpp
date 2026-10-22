@@ -44,8 +44,6 @@ cd build
 cmake ../
 make
 sudo make install
-# 刷新动态库缓存，否则运行 neupan_node 时会找不到 libOsqpEigen.so
-sudo ldconfig
 ```
 
 ```bash
@@ -83,26 +81,17 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | 输出 | `/neupan_cmd_vel` | `geometry_msgs/Twist`,launch 里 remap 为 `/cmd_vel` |
 | 输出 | `/neupan_arrive` | `std_msgs/Bool`,每周期发布,到点后保持 true 直到换路径 |
 | 输出 | `/neupan_diagnostics` | `diagnostic_msgs/DiagnosticArray`,求解状态、连续失败次数、最小距离、卡死标志 |
-| 输出 | `/neupan_plan`、`/neupan_initial_path`、`/dune_point_markers` … | 可视化;`/neupan_initial_path` 为 latched(transient_local),仅在路径变化时发布 |
-
-话题名都是相对名，节点放进命名空间(`-r __ns:=/robot1`)后会整体跟随;上表是根命名空间下的名字。
+| 输出 | `/neupan_plan`、`/neupan_initial_path`、`/dune_point_markers` … | 可视化 |
 
 规划器配置沿用 `planner.yaml` 的键名,但只支持 `kinematics: diff` 与 `curve_style: line`,
 `loop: true` 未移植。`d_min < 0`、`d_max < d_min`、`eta > 0` 而 `d_max <= 0`、
-`collision_threshold <= 0` 这几种组合会在加载时抛异常;`ref_speed <= 0`、速度/加速度/尺寸不为正、
-`iter_num`/`dune_max_num`/`nrmp_max_num` 或 `ipath.ind_range` 小于 1 同样会被拒绝。主要调参:
+`collision_threshold <= 0` 这几种组合会在加载时抛异常。主要调参:
 `collision_threshold`(硬急停距离)、`adjust.d_max` / `d_min`(贴障碍多近)、`ref_speed`、
 `max_speed`。
 
-`planner.yaml` 还可以带一个上游没有的可选 `osqp:` 段，用来调 QP 求解器:`eps_abs`/`eps_rel`
-(默认 1e-5)、`max_iter`(默认 10000)、`polish`(默认 true)、`verbose`、`time_limit`
-(秒，默认 0 表示不限)。设置 `time_limit` 可以给单帧求解耗时封顶，超时按未求解处理：本帧输出上一帧的
-标称控制，连续超过 `solver_fail_grace` 次即停车。
-
 节点参数:`config_file` 与 `dune_checkpoint` 必填,缺失即抛异常。`scan_timeout` 默认
 0.5 s,超时后清空障碍点并停车。`solver_fail_grace` 默认 5,连续求解失败超过此数即停车。
-`stall_speed` 与 `stall_timeout` 默认 0.02 m/s 与 3 s,用于判定卡死。`lidar_frame` 默认为空，
-即使用每帧 scan 的 `header.frame_id`;障碍点按 scan 时间戳处的传感器位姿变换,TF 尚未到达时退回最新位姿。
+`stall_speed` 与 `stall_timeout` 默认 0.02 m/s 与 3 s,用于判定卡死。
 
 ### 一个参考全局规划器(可选)
 
@@ -197,10 +186,6 @@ neupan_cpp/
 
 `libneupan` 是纯 CMake 库,可脱离 ROS 单独使用;`neupan_cpp_ros` 是 `ament_cmake` 包。
 两者一起用 colcon 构建。
-
-`colcon test` 会运行 libneupan 的单元测试(含与 Python 版的逐项对比)以及 `neupan_cpp_ros/test`
-下不依赖仿真器的 ROS 场景测试(冒烟、闭环、路径超调、A\*)。CI(`.github/workflows/ci.yml`)
-在每次推送时跑格式检查、libneupan 构建测试和 ROS 2 Humble 下的 colcon build/test。
 
 
 

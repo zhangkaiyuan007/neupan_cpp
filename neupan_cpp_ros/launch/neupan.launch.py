@@ -19,9 +19,8 @@ def generate_launch_description():
             'config_file': default_config,
             'dune_checkpoint': default_model,
         }],
-        # Relative, so the remap follows the node into a namespace.
         remappings=[
-            ('neupan_cmd_vel', 'cmd_vel'),
+            ('/neupan_cmd_vel', '/cmd_vel'),
         ],
     )
 

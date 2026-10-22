@@ -12,28 +12,25 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdio>
 
 #include "neupan/neupan_planner.hpp"
 #include "neupan/tensor_io.hpp"
-#include "reference_data.hpp"
 
 using namespace neupan;
 
 namespace {
 const std::string kData = NEUPAN_TEST_DATA_DIR;
 const std::string kModel = std::string(NEUPAN_MODEL_DIR) + "/diff_default.bin";
-}  // namespace
+}
 
 // End-to-end replay against the Python reference: feed the recorded state
-// sequence, compare actions (per-frame inf-norm diff < 5% of the velocity
-// scale). Frame time is printed, not asserted: a wall-clock bound fails at
-// random on slower or loaded machines; tools/bench.cpp measures speed.
+// sequence, compare actions. M2 acceptance: per-frame action inf-norm diff
+// < 5% of the velocity scale, mean frame time < 5 ms.
 TEST(Replay, EndToEndMatchesPython) {
   const TensorFile tf = TensorFile::load(kData + "/replay.nptf");
-  const int n_frames = ref::scalarInt(tf, "meta.n_frames");
+  const int n_frames = static_cast<int>(tf.at("meta.n_frames")(0, 0));
   const Mat2X points = tf.at("points");
 
   NeuPANPlanner planner =
@@ -46,7 +43,9 @@ TEST(Replay, EndToEndMatchesPython) {
   int mismatched_flags = 0, outliers = 0;
 
   for (int f = 0; f < n_frames; ++f) {
-    const std::string pre = ref::replayKey(f);
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "r%02d", f);
+    const std::string pre = buf;
 
     const Vec3 state = tf.at(pre + ".state").col(0);
     const Vec2 action_py = tf.at(pre + ".action").col(0);
@@ -68,14 +67,16 @@ TEST(Replay, EndToEndMatchesPython) {
 
     // 5% per frame; up to 2 frames may fall in (5%, 10%]: at decision
     // boundaries the PAM stop criterion can run one iteration more or less
-    // than the reference.
-    EXPECT_LT(diff, 0.10 * scale)
-        << pre << " action_cpp=(" << action(0) << "," << action(1)
-        << ") action_py=(" << action_py(0) << "," << action_py(1) << ")";
+    // than the reference (anticipated in the migration plan).
+    EXPECT_LT(diff, 0.10 * scale) << pre << " action_cpp=(" << action(0)
+                                  << "," << action(1) << ") action_py=("
+                                  << action_py(0) << "," << action_py(1)
+                                  << ")";
     if (diff >= 0.05 * scale) ++outliers;
     if (info.stop != stop_py || info.arrive != arrive_py) ++mismatched_flags;
 
-    EXPECT_NEAR(info.min_distance, tf.at(pre + ".min_dist")(0, 0), 0.05) << pre;
+    EXPECT_NEAR(info.min_distance, tf.at(pre + ".min_dist")(0, 0), 0.05)
+        << pre;
 
     // Strict open-loop comparison: sync the hidden nominal control sequence
     // to the Python reference so solver tolerance differences don't get
@@ -94,4 +95,5 @@ TEST(Replay, EndToEndMatchesPython) {
       n_frames, sum_action_diff / n_frames, max_action_diff,
       100.0 * max_action_diff / scale, scale, outliers, mean_ms,
       max_us / 1000.0);
+  EXPECT_LT(mean_ms, 5.0);  // M2 acceptance on the dev machine
 }

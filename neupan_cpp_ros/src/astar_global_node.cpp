@@ -31,8 +31,6 @@
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
 
-#include "msg_utils.hpp"
-
 namespace {
 
 constexpr double kSqrt2 = 1.41421356237;
@@ -49,20 +47,20 @@ class AStarGlobalNode : public rclcpp::Node {
     allow_unknown_ = declare_parameter<bool>("allow_unknown", false);
     // Douglas-Peucker tolerance (m): larger -> fewer, coarser waypoints.
     simplify_tol_ = declare_parameter<double>("simplify_tolerance", 0.15);
-    // Decision layers republish the same goal every tick; don't replan each.
+    // Decision layers republish the same goal every tick; without this each one replans.
     goal_tolerance_ = declare_parameter<double>("goal_tolerance", 0.3);
 
-    path_pub_ = create_publisher<nav_msgs::msg::Path>("initial_path", 10);
+    path_pub_ = create_publisher<nav_msgs::msg::Path>("/initial_path", 10);
 
     rclcpp::QoS map_qos(1);
     map_qos.transient_local().reliable();
     map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>(
-        "map", map_qos,
+        "/map", map_qos,
         [this](nav_msgs::msg::OccupancyGrid::ConstSharedPtr msg) {
           onMap(*msg);
         });
     goal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-        "goal_pose", 10,
+        "/goal_pose", 10,
         [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr msg) {
           onGoal(*msg);
         });
@@ -78,14 +76,15 @@ class AStarGlobalNode : public rclcpp::Node {
   // Inflate obstacles/unknowns by robot_radius via multi-source BFS (Chebyshev
   // dilation), so A* only walks cells the robot body can occupy.
   void onMap(const nav_msgs::msg::OccupancyGrid& map) {
+    map_ = map;
     w_ = map.info.width;
     h_ = map.info.height;
     res_ = map.info.resolution;
     ox_ = map.info.origin.position.x;
     oy_ = map.info.origin.position.y;
 
-    const int radius_cells =
-        std::max(0, static_cast<int>(std::round(robot_radius_ / res_)));
+    const int radius_cells = std::max(0, static_cast<int>(
+                                             std::round(robot_radius_ / res_)));
     blocked_.assign(static_cast<size_t>(w_) * h_, 0);
     std::vector<int> dist(static_cast<size_t>(w_) * h_, -1);
     std::queue<int> q;
@@ -147,8 +146,8 @@ class AStarGlobalNode : public rclcpp::Node {
     }
 
     int sx, sy, gx, gy;
-    if (!worldToCell(tf.transform.translation.x, tf.transform.translation.y, sx,
-                     sy) ||
+    if (!worldToCell(tf.transform.translation.x, tf.transform.translation.y,
+                     sx, sy) ||
         !worldToCell(goal.pose.position.x, goal.pose.position.y, gx, gy)) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
                            "start or goal outside the map");
@@ -162,9 +161,8 @@ class AStarGlobalNode : public rclcpp::Node {
 
     const std::vector<int> cells = astar(sy * w_ + sx, gy * w_ + gx);
     if (cells.empty()) {
-      RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 2000,
-          "A* found no path to goal, keeping the previous one");
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "A* found no path to goal, keeping the previous one");
       return;
     }
 
@@ -174,7 +172,7 @@ class AStarGlobalNode : public rclcpp::Node {
       pts.push_back({ox_ + (c % w_ + 0.5) * res_, oy_ + (c / w_ + 0.5) * res_});
     pts = simplify(pts, simplify_tol_);
 
-    // Cell centres stop short of the goal; restore it unless it was snapped.
+    // Cell centres stop short of the goal; restore it only if it was not snapped.
     if (!goal_snapped && !pts.empty())
       pts.back() = {goal.pose.position.x, goal.pose.position.y};
 
@@ -182,8 +180,7 @@ class AStarGlobalNode : public rclcpp::Node {
     last_goal_x_ = goal.pose.position.x;
     last_goal_y_ = goal.pose.position.y;
     have_path_ = true;
-    RCLCPP_INFO(get_logger(),
-                "published global path: %zu cells -> %zu waypoints",
+    RCLCPP_INFO(get_logger(), "published global path: %zu cells -> %zu waypoints",
                 cells.size(), pts.size());
   }
 
@@ -302,14 +299,25 @@ class AStarGlobalNode : public rclcpp::Node {
     path.header.frame_id = map_frame_;
     path.header.stamp = now();
     for (size_t i = 0; i < pts.size(); ++i) {
-      const double yaw =
-          i + 1 < pts.size()
-              ? std::atan2(pts[i + 1][1] - pts[i][1], pts[i + 1][0] - pts[i][0])
-              : neupan_ros::quatToYaw(goal.pose.orientation);
-      path.poses.push_back(
-          neupan_ros::planarPose(path.header, pts[i][0], pts[i][1], yaw));
+      geometry_msgs::msg::PoseStamped ps;
+      ps.header = path.header;
+      ps.pose.position.x = pts[i][0];
+      ps.pose.position.y = pts[i][1];
+      double yaw;
+      if (i + 1 < pts.size())
+        yaw = std::atan2(pts[i + 1][1] - pts[i][1], pts[i + 1][0] - pts[i][0]);
+      else
+        yaw = tf2YawFromQuat(goal.pose.orientation);
+      ps.pose.orientation.z = std::sin(yaw / 2.0);
+      ps.pose.orientation.w = std::cos(yaw / 2.0);
+      path.poses.push_back(ps);
     }
     path_pub_->publish(path);
+  }
+
+  static double tf2YawFromQuat(const geometry_msgs::msg::Quaternion& q) {
+    return std::atan2(2.0 * (q.w * q.z + q.x * q.y),
+                      1.0 - 2.0 * (q.z * q.z + q.y * q.y));
   }
 
   std::string map_frame_, base_frame_;
@@ -319,6 +327,7 @@ class AStarGlobalNode : public rclcpp::Node {
   double last_goal_x_ = 0.0, last_goal_y_ = 0.0;
   bool have_path_ = false;
 
+  nav_msgs::msg::OccupancyGrid map_;
   std::vector<uint8_t> blocked_;
   int w_ = 0, h_ = 0;
   double res_ = 0.0, ox_ = 0.0, oy_ = 0.0;

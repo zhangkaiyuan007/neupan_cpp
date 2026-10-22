@@ -1,4 +1,0 @@
-# Google style, which the code already follows; keep the existing include
-# groups (C/.h, C++ standard, third-party, project) instead of merging them.
-BasedOnStyle: Google
-IncludeBlocks: Preserve

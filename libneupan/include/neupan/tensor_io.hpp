@@ -29,9 +29,10 @@ namespace neupan {
 //               uint32 dtype (0=f32, 1=f64) | uint32 rows | uint32 cols |
 //               row-major data
 struct TensorFile {
-  // All tensors are widened to double on load; float32 weights round-trip
-  // exactly, and MLP narrows them back to match PyTorch.
+  // All tensors are widened to double on load; original dtype is preserved
+  // in `dtypes` (weights are stored/used as float32 to match PyTorch).
   std::map<std::string, Mat> tensors;
+  std::map<std::string, int> dtypes;
   std::vector<std::string> order;  // record order in file
 
   static TensorFile load(const std::string& path);

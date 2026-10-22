@@ -12,24 +12,23 @@
 
 #pragma once
 
-#include <memory>
 #include <vector>
 
-#include "neupan/math_utils.hpp"
 #include "neupan/robot.hpp"
 #include "neupan/types.hpp"
 
 namespace neupan {
 
+double wrapToPi(double rad);
+
 // Port of neupan/blocks/initial_path.py restricted to curve_style == "line"
 // (each path point is [x, y, theta, gear], gear always 1 for line paths).
-// Method names follow upstream so the two can be read side by side.
 class InitialPath {
  public:
   struct Options {
     std::vector<Vec3> waypoints;
     bool loop = false;
-    double interval = -1.0;  // <= 0: default dt * ref_speed
+    double interval = -1.0;  // < 0: default dt * ref_speed
     double arrive_threshold = 0.1;
     double close_threshold = 0.1;
     int ind_range = 10;
@@ -38,66 +37,64 @@ class InitialPath {
 
   using PathPoint = Eigen::Vector4d;  // x, y, theta, gear
 
-  // ref_speed only sets the default point spacing; the speed actually
-  // tracked is passed to generateNomRefState each cycle.
-  InitialPath(std::shared_ptr<const Robot> robot, double ref_speed,
-              const Options& opts);
+  InitialPath(const Robot& robot, double ref_speed, const Options& opts);
 
-  // neupan.forward step 1: advances the progress index to the point closest
-  // to `state` and returns true once the path end is reached. Arrival latches
-  // until a new path is installed or reset() is called. Builds the path from
-  // `state` and the configured waypoints first if none is set.
+  // neupan.forward step 1: returns true when arrived at the path end.
+  // Generates the initial path from the current state on first call.
   bool checkArrive(const Vec3& state);
 
+  struct NomRef {
+    Mat3X nom_s;   // (3, T+1)
+    Mat2X nom_u;   // (2, T) == cur_vel_array
+    Mat3X ref_s;   // (3, T+1)
+    Vec ref_us;    // (T,)
+  };
   NomRef generateNomRefState(const Vec3& state, const Mat2X& cur_vel_array,
                              double ref_speed) const;
 
-  // Path setters. All of them restart progress at the path start, except
-  // replaceInitialPath, which re-projects `state` to keep it.
-  void setIpathWithState(const Vec3& state);  // state + configured waypoints
+  void setIpathWithState(const Vec3& state);
   void setIpathWithWaypoints(const std::vector<Vec3>& waypoints);
   void updateInitialPathFromGoal(const Vec3& start, const Vec3& goal);
-  // Port of set_initial_path: installs an external path, re-densified to the
-  // point spacing.
+  // Port of set_initial_path: installs an external path, re-densified to interval_.
   void setInitialPath(std::vector<PathPoint> path);
+  // setInitialPath, but re-projects the state onto the new path to keep progress.
   void replaceInitialPath(std::vector<PathPoint> path, const Vec3& state);
   void reset();
 
   bool hasPath() const { return !curve_list_.empty(); }
   bool hasConfiguredWaypoints() const { return !opts_.waypoints.empty(); }
   const std::vector<PathPoint>& initialPath() const { return initial_path_; }
-  // Incremented whenever a new path is installed, so observers can tell when
-  // to republish it.
-  int revision() const { return revision_; }
-  bool arrived() const { return arrive_flag_; }
 
  private:
   std::vector<PathPoint> generateLineCurve(
       const std::vector<Vec3>& waypoints) const;
   void setPath(std::vector<PathPoint> path);
   void splitPathWithGear();
-  // Moves point_index_ to the closest point within ind_range ahead.
-  void advanceToClosestPoint(const Vec3& state);
+  double closestPoint(const Vec3& state, double threshold, int ind_range);
   bool checkCurveArrive(const Vec3& state) const;
   // Returns intersection of circle (ref xy, radius=length) with the curve,
   // advancing ref_index; mirrors find_interaction_point.
   Vec3 findInteractionPoint(const Vec3& ref_state, int& ref_index,
                             double length) const;
+  Vec3 motionPredict(const Vec3& state, const Vec2& vel) const;
 
   const std::vector<PathPoint>& curCurve() const {
     return curve_list_[curve_index_];
   }
 
-  std::shared_ptr<const Robot> robot_;
+  Robot robot_;
+  int T_;
+  double dt_;
+  double ref_speed_;
   Options opts_;
-  double interval_;  // point spacing of generated / re-densified paths
+  double interval_ = 0.0;
 
   std::vector<PathPoint> initial_path_;
   std::vector<std::vector<PathPoint>> curve_list_;
-  int revision_ = 0;
-
-  // progress along the path, updated by checkArrive
   int curve_index_ = 0;
+
+ public:
+  // exposed for the planner / visualization (mutated by checkArrive)
   int point_index_ = 0;
   bool arrive_flag_ = false;
 };

@@ -20,89 +20,60 @@ namespace neupan {
 
 namespace {
 
-constexpr uint32_t kDtypeF32 = 0;
-constexpr uint32_t kDtypeF64 = 1;
-
-class Reader {
- public:
-  explicit Reader(const std::string& path)
-      : path_(path), f_(path, std::ios::binary | std::ios::ate) {
-    if (!f_) throw std::runtime_error("tensor_io: cannot open " + path);
-    remaining_ = static_cast<uint64_t>(f_.tellg());
-    f_.seekg(0);
-  }
-
-  // Refuses reads past the end of the file before allocating for them, so a
-  // corrupt size field cannot trigger a huge allocation.
-  void read(void* dst, uint64_t bytes) {
-    if (bytes > remaining_) fail("truncated data");
-    f_.read(static_cast<char*>(dst), static_cast<std::streamsize>(bytes));
-    if (!f_) fail("truncated data");
-    remaining_ -= bytes;
-  }
-
-  uint32_t u32() {
-    uint32_t v;
-    read(&v, sizeof(v));
-    return v;
-  }
-
-  std::string str(uint32_t len) {
-    if (len > remaining_) fail("truncated data");
-    std::string s(len, '\0');
-    read(s.data(), len);
-    return s;
-  }
-
-  // Row-major payload of `rows` x `cols` scalars of type T.
-  template <typename T>
-  Mat matrix(uint32_t rows, uint32_t cols) {
-    const uint64_t bytes = uint64_t{rows} * cols * sizeof(T);
-    if (bytes > remaining_) fail("truncated data");
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> m(rows,
-                                                                        cols);
-    read(m.data(), bytes);
-    return m.template cast<double>();
-  }
-
-  [[noreturn]] void fail(const std::string& what) const {
-    throw std::runtime_error("tensor_io: " + what + " in " + path_);
-  }
-
- private:
-  std::string path_;
-  std::ifstream f_;
-  uint64_t remaining_ = 0;
-};
+template <typename T>
+T readScalar(std::ifstream& f) {
+  T v;
+  f.read(reinterpret_cast<char*>(&v), sizeof(T));
+  if (!f) throw std::runtime_error("tensor_io: unexpected end of file");
+  return v;
+}
 
 }  // namespace
 
 TensorFile TensorFile::load(const std::string& path) {
-  Reader in(path);
+  std::ifstream f(path, std::ios::binary);
+  if (!f) throw std::runtime_error("tensor_io: cannot open " + path);
 
   char magic[4];
-  in.read(magic, sizeof(magic));
-  if (std::string(magic, 4) != "NPTF") in.fail("bad magic");
-  if (in.u32() != 1) in.fail("unsupported version");
+  f.read(magic, 4);
+  if (!f || std::string(magic, 4) != "NPTF")
+    throw std::runtime_error("tensor_io: bad magic in " + path);
+
+  const auto version = readScalar<uint32_t>(f);
+  if (version != 1)
+    throw std::runtime_error("tensor_io: unsupported version in " + path);
 
   TensorFile out;
-  const uint32_t count = in.u32();
+  const auto count = readScalar<uint32_t>(f);
   for (uint32_t i = 0; i < count; ++i) {
-    const std::string name = in.str(in.u32());
+    const auto nameLen = readScalar<uint32_t>(f);
+    std::string name(nameLen, '\0');
+    f.read(name.data(), nameLen);
 
-    const uint32_t dtype = in.u32();
-    const uint32_t rows = in.u32();
-    const uint32_t cols = in.u32();
+    const auto dtype = readScalar<uint32_t>(f);
+    const auto rows = readScalar<uint32_t>(f);
+    const auto cols = readScalar<uint32_t>(f);
 
-    Mat m;
-    if (dtype == kDtypeF32)
-      m = in.matrix<float>(rows, cols);
-    else if (dtype == kDtypeF64)
-      m = in.matrix<double>(rows, cols);
-    else
-      in.fail("unknown dtype");
+    Mat m(rows, cols);
+    if (dtype == 0) {
+      std::vector<float> buf(static_cast<size_t>(rows) * cols);
+      f.read(reinterpret_cast<char*>(buf.data()), buf.size() * sizeof(float));
+      for (uint32_t r = 0; r < rows; ++r)
+        for (uint32_t c = 0; c < cols; ++c)
+          m(r, c) = buf[static_cast<size_t>(r) * cols + c];
+    } else if (dtype == 1) {
+      std::vector<double> buf(static_cast<size_t>(rows) * cols);
+      f.read(reinterpret_cast<char*>(buf.data()), buf.size() * sizeof(double));
+      for (uint32_t r = 0; r < rows; ++r)
+        for (uint32_t c = 0; c < cols; ++c)
+          m(r, c) = buf[static_cast<size_t>(r) * cols + c];
+    } else {
+      throw std::runtime_error("tensor_io: unknown dtype in " + path);
+    }
+    if (!f) throw std::runtime_error("tensor_io: truncated data in " + path);
 
     out.tensors[name] = std::move(m);
+    out.dtypes[name] = static_cast<int>(dtype);
     out.order.push_back(name);
   }
   return out;

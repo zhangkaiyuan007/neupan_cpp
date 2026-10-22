@@ -19,9 +19,7 @@ namespace neupan {
 enum class Kinematics { Diff };  // v0.2: Omni, later: Acker
 
 // Port of neupan/robot/robot.py: robot geometry (convex hull G x <= h),
-// velocity/acceleration bounds, and the kinematic model. All motion-model
-// code lives here, so a new Kinematics value only touches robot.cpp.
-// Immutable once built; the planner blocks share one instance.
+// velocity/acceleration bounds, and linearized kinematics.
 class Robot {
  public:
   Robot(Kinematics kinematics, int receding, double step_time, Vec2 max_speed,
@@ -31,9 +29,6 @@ class Robot {
   static Robot diffRectangle(int receding, double step_time, Vec2 max_speed,
                              Vec2 max_acce, double length, double width,
                              double wheelbase = 0.0);
-
-  // One step of the nonlinear model: s_{t+1} = f(s_t, u_t) (motion_predict).
-  Vec3 propagate(const Vec3& s, const Vec2& u) const;
 
   // Linearized dynamics s_{t+1} = A s_t + B u_t + C around (nom_s_t, nom_u_t).
   void linearize(const Vec3& nom_s_t, const Vec2& nom_u_t, Mat33& A, Mat32& B,

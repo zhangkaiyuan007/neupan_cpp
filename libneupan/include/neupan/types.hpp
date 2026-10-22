@@ -13,6 +13,7 @@
 #pragma once
 
 #include <Eigen/Dense>
+#include <vector>
 
 namespace neupan {
 
@@ -28,14 +29,5 @@ using Vec3 = Eigen::Vector3d;
 
 using MatF = Eigen::MatrixXf;
 using VecF = Eigen::VectorXf;
-
-// One MPC problem's inputs (neupan.forward): the nominal trajectory the
-// dynamics are linearized around, and the reference it should track.
-struct NomRef {
-  Mat3X nom_s;  // (3, T+1) nominal states
-  Mat2X nom_u;  // (2, T) nominal controls (the previous solution)
-  Mat3X ref_s;  // (3, T+1) reference states along the path
-  Vec ref_us;   // (T,) reference forward speed
-};
 
 }  // namespace neupan

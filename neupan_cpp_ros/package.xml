@@ -25,11 +25,6 @@
 
   <exec_depend>ros2launch</exec_depend>
 
-  <test_depend>launch_testing_ament_cmake</test_depend>
-  <test_depend>launch_ros</test_depend>
-  <test_depend>rclpy</test_depend>
-  <test_depend>tf2_ros_py</test_depend>
-
   <export>
     <build_type>ament_cmake</build_type>
   </export>

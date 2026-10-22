@@ -12,15 +12,12 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <cstdio>
-#include <memory>
 
 #include "neupan/dune.hpp"
 #include "neupan/mlp.hpp"
 #include "neupan/robot.hpp"
 #include "neupan/tensor_io.hpp"
-#include "reference_data.hpp"
 
 using namespace neupan;
 
@@ -29,11 +26,10 @@ namespace {
 const std::string kData = NEUPAN_TEST_DATA_DIR;
 const std::string kModel = std::string(NEUPAN_MODEL_DIR) + "/diff_default.bin";
 
-std::shared_ptr<const Robot> lonRobot() {
+Robot lonRobot() {
   // example/LON/planner.yaml: diff, max_speed [8,1], max_acce [8,3],
   // length 1.6, width 2.0, T=10, dt=0.1
-  return std::make_shared<const Robot>(
-      Robot::diffRectangle(10, 0.1, Vec2(8, 1), Vec2(8, 3), 1.6, 2.0));
+  return Robot::diffRectangle(10, 0.1, Vec2(8, 1), Vec2(8, 3), 1.6, 2.0);
 }
 
 }  // namespace
@@ -51,65 +47,77 @@ TEST(Dune, MlpMatchesPyTorch) {
   ASSERT_EQ(mu_cpp.rows(), mu_py.rows());
   ASSERT_EQ(mu_cpp.cols(), mu_py.cols());
 
-  const double max_diff = (mu_cpp.cast<double>() - mu_py).cwiseAbs().maxCoeff();
+  const double max_diff =
+      (mu_cpp.cast<double>() - mu_py).cwiseAbs().maxCoeff();
   std::printf("MLP max|mu_cpp - mu_py| = %.3e over %ld points\n", max_diff,
               static_cast<long>(mu_py.cols()));
-  EXPECT_LT(max_diff, 1e-4);
+  EXPECT_LT(max_diff, 1e-4);  // M1 acceptance
 }
 
 TEST(Dune, RobotGhMatchesUpstream) {
   const TensorFile tf = TensorFile::load(kData + "/frames.nptf");
-  const auto robot = lonRobot();
-  EXPECT_LT((robot->G - tf.at("meta.G")).cwiseAbs().maxCoeff(), 1e-12);
-  EXPECT_LT((robot->h - tf.at("meta.h")).cwiseAbs().maxCoeff(), 1e-12);
-  EXPECT_LT((robot->max_speed - tf.at("meta.max_speed")).cwiseAbs().maxCoeff(),
+  const Robot robot = lonRobot();
+  EXPECT_LT((robot.G - tf.at("meta.G")).cwiseAbs().maxCoeff(), 1e-12);
+  EXPECT_LT((robot.h - tf.at("meta.h")).cwiseAbs().maxCoeff(), 1e-12);
+  EXPECT_LT((robot.max_speed - tf.at("meta.max_speed")).cwiseAbs().maxCoeff(),
             1e-12);
   EXPECT_LT(
-      (robot->acce_bound - tf.at("meta.acce_bound")).cwiseAbs().maxCoeff(),
+      (robot.acce_bound - tf.at("meta.acce_bound")).cwiseAbs().maxCoeff(),
       1e-12);
 }
 
 TEST(Dune, ForwardMatchesPython) {
   const TensorFile tf = TensorFile::load(kData + "/frames.nptf");
-  const DUNE dune(lonRobot(), kModel);
+  const Robot robot = lonRobot();
+  const DUNE dune(robot, kModel);
 
-  const int T = ref::scalarInt(tf, "meta.T");
-  const int n_frames = ref::scalarInt(tf, "meta.n_frames");
+  const int T = static_cast<int>(tf.at("meta.T")(0, 0));
+  const int n_frames = static_cast<int>(tf.at("meta.n_frames")(0, 0));
 
   double max_mu_diff = 0.0, max_lam_diff = 0.0, max_pt_diff = 0.0;
-  const auto maxAbsDiff = [](const Mat& a, const Mat& b) {
-    return (a - b).cwiseAbs().maxCoeff();
-  };
 
   for (int f = 0; f < n_frames; ++f) {
-    const int n_iters = ref::scalarInt(tf, ref::frameKey(f) + ".n_iters");
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "f%02d", f);
+    const int n_iters =
+        static_cast<int>(tf.at(std::string(buf) + ".n_iters")(0, 0));
 
     for (int it = 0; it < n_iters; ++it) {
-      const std::string pre = ref::iterKey(f, it);
+      std::snprintf(buf, sizeof(buf), "f%02d_it%d", f, it);
+      const std::string pre = buf;
 
-      const DUNE::Output out =
-          dune.forward(ref::stages<Mat2X>(tf, pre, "pf", T),
-                       ref::stages<Mat22>(tf, pre, "R", T),
-                       ref::stages<Mat2X>(tf, pre, "op", T));
+      std::vector<Mat2X> pf, op;
+      std::vector<Mat22> R;
+      for (int t = 0; t <= T; ++t) {
+        std::snprintf(buf, sizeof(buf), "_s%02d", t);
+        pf.push_back(tf.at(pre + ".pf" + buf));
+        R.push_back(tf.at(pre + ".R" + buf));
+        op.push_back(tf.at(pre + ".op" + buf));
+      }
+
+      const DUNE::Output out = dune.forward(pf, R, op);
 
       EXPECT_NEAR(out.min_distance, tf.at(pre + ".min_dist")(0, 0), 1e-4);
       for (int t = 0; t <= T; ++t) {
-        const std::string st = ref::stageKey(t);
+        std::snprintf(buf, sizeof(buf), "_s%02d", t);
         max_mu_diff = std::max(
-            max_mu_diff, maxAbsDiff(out.mu_list[t], tf.at(pre + ".mu" + st)));
-        max_lam_diff =
-            std::max(max_lam_diff,
-                     maxAbsDiff(out.lam_list[t], tf.at(pre + ".lam" + st)));
+            max_mu_diff, (out.mu_list[t] - tf.at(pre + ".mu" + buf))
+                             .cwiseAbs()
+                             .maxCoeff());
+        max_lam_diff = std::max(
+            max_lam_diff, (out.lam_list[t] - tf.at(pre + ".lam" + buf))
+                              .cwiseAbs()
+                              .maxCoeff());
         max_pt_diff = std::max(
-            max_pt_diff,
-            maxAbsDiff(out.sort_point_list[t], tf.at(pre + ".sp" + st)));
+            max_pt_diff, (out.sort_point_list[t] - tf.at(pre + ".sp" + buf))
+                             .cwiseAbs()
+                             .maxCoeff());
       }
     }
   }
 
-  std::printf(
-      "DUNE forward: max mu diff %.3e, lam diff %.3e, point diff %.3e\n",
-      max_mu_diff, max_lam_diff, max_pt_diff);
+  std::printf("DUNE forward: max mu diff %.3e, lam diff %.3e, point diff %.3e\n",
+              max_mu_diff, max_lam_diff, max_pt_diff);
   EXPECT_LT(max_mu_diff, 1e-4);
   EXPECT_LT(max_lam_diff, 1e-3);
   // identical sorting => identical point selection

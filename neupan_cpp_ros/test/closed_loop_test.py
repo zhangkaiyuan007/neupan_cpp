@@ -27,7 +27,6 @@ class ClosedLoop(Node):
         self.dt = 0.02
         self.t = 0.0
         self.goal_sent = False
-        self.last_goal_t = -1.0
 
         self.bc = TransformBroadcaster(self)
         self.scan_pub = self.create_publisher(LaserScan, "/scan", qos_profile_sensor_data)
@@ -62,11 +61,7 @@ class ClosedLoop(Node):
         self._bcast()
         self.t += self.dt
 
-        # Resend until the robot moves: a goal that reaches the node before its
-        # first TF pose is dropped.
-        moving = abs(self.v) > 1e-3 or abs(self.w) > 1e-3
-        if self.t > 1.0 and not moving and self.t - self.last_goal_t >= 1.0:
-            self.last_goal_t = self.t
+        if not self.goal_sent and self.t > 1.0:
             g = PoseStamped()
             g.header.frame_id = "map"
             g.header.stamp = self.get_clock().now().to_msg()
@@ -86,11 +81,11 @@ class ClosedLoop(Node):
 
         if self.goal_sent and math.hypot(self.gx - self.x, self.gy - self.y) < 0.2:
             self.get_logger().info(f"ARRIVED at t={self.t:.1f}")
-            sys.exit(0)
+            rclpy.shutdown(); sys.exit(0)
 
         if self.t > 25.0:
             self.get_logger().error("TIMEOUT (did not arrive)")
-            sys.exit(1)
+            rclpy.shutdown(); sys.exit(1)
 
     def _pub_scan(self):
         msg = LaserScan()
@@ -108,13 +103,7 @@ def main():
     gx = float(sys.argv[1]) if len(sys.argv) > 1 else 3.0
     gy = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
     rclpy.init()
-    try:
-        # Callbacks finish with sys.exit(); rclpy.shutdown() inside a callback
-        # deadlocks on Humble, so shut down here once spin() unwinds.
-        rclpy.spin(ClosedLoop(gx, gy))
-    finally:
-        if rclpy.ok():
-            rclpy.shutdown()
+    rclpy.spin(ClosedLoop(gx, gy))
 
 
 if __name__ == "__main__":

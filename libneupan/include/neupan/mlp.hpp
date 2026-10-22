@@ -50,10 +50,6 @@ class MLP {
 
   std::vector<Layer> layers;
   static constexpr float kLayerNormEps = 1e-5f;  // torch default
-
- private:
-  // Throws unless consecutive layer sizes line up.
-  void checkShapes() const;
 };
 
 }  // namespace neupan

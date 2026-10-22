@@ -42,8 +42,6 @@ cd build
 cmake ../
 make
 sudo make install
-# refresh the loader cache, or neupan_node cannot find libOsqpEigen.so
-sudo ldconfig
 ```
 
 ```bash
@@ -80,17 +78,13 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | Output    | `/neupan_cmd_vel`                                            | `geometry_msgs/Twist`, remapped to `/cmd_vel` in the launch file |
 | Output    | `/neupan_arrive`                                             | `std_msgs/Bool`, published every cycle, stays true after arrival until the path is replaced |
 | Output    | `/neupan_diagnostics`                                        | `diagnostic_msgs/DiagnosticArray`, solve status, consecutive failures, min distance, stall flag |
-| Output    | `/neupan_plan`, `/neupan_initial_path`, `/dune_point_markers` … | Visualization; `/neupan_initial_path` is latched (transient_local) and published only when the path changes |
+| Output    | `/neupan_plan`, `/neupan_initial_path`, `/dune_point_markers` … | Visualization                                         |
 
-All topic names are relative, so they follow the node into a namespace (`-r __ns:=/robot1`); the table lists them in the root namespace.
-
-The planner configuration keeps `planner.yaml`'s key names, but only `kinematics: diff` and `curve_style: line` are supported and `loop: true` is not ported. The combinations `d_min < 0`, `d_max < d_min`, `eta > 0` with `d_max <= 0`, and `collision_threshold <= 0` throw on load, as do `ref_speed <= 0`, non-positive speed/acceleration limits or footprint size, and `iter_num`/`dune_max_num`/`nrmp_max_num` or `ipath.ind_range` below 1.
-
-`planner.yaml` may also carry an optional `osqp:` block (not in upstream) for the QP solver: `eps_abs`/`eps_rel` (default 1e-5), `max_iter` (default 10000), `polish` (default true), `verbose`, and `time_limit` (seconds, default 0 = no limit). A `time_limit` caps the per-frame solve time; a solve that hits it counts as unsolved: the frame outputs the previous nominal control, and the robot stops after more than `solver_fail_grace` in a row.
+The planner configuration keeps `planner.yaml`'s key names, but only `kinematics: diff` and `curve_style: line` are supported and `loop: true` is not ported. The combinations `d_min < 0`, `d_max < d_min`, `eta > 0` with `d_max <= 0`, and `collision_threshold <= 0` throw on load.
 
 Key tuning parameters: `collision_threshold` (hard emergency stop distance), `adjust.d_max` / `d_min` (how close it can get to obstacles), `ref_speed`, and `max_speed`.
 
-Node parameters: `config_file` and `dune_checkpoint` are required and throw when missing. `scan_timeout` defaults to 0.5 s, after which the obstacle points are cleared and the robot stops. `solver_fail_grace` defaults to 5 consecutive failed solves before stopping. `stall_speed` and `stall_timeout` default to 0.02 m/s and 3 s, and flag a stall. `lidar_frame` defaults to empty, meaning each scan's `header.frame_id`; scan points are transformed with the sensor pose at the scan's stamp, falling back to the latest pose when TF has not caught up.
+Node parameters: `config_file` and `dune_checkpoint` are required and throw when missing. `scan_timeout` defaults to 0.5 s, after which the obstacle points are cleared and the robot stops. `solver_fail_grace` defaults to 5 consecutive failed solves before stopping. `stall_speed` and `stall_timeout` default to 0.02 m/s and 3 s, and flag a stall.
 
 ### Reference Global Planner (Optional)
 
@@ -187,8 +181,6 @@ neupan_cpp/
 ```
 
 `libneupan` is a pure CMake library that can be used independently of ROS; `neupan_cpp_ros` is an `ament_cmake` package. Both are built together using ```colcon```.
-
-`colcon test` runs the libneupan unit tests (including the item-by-item comparison with the Python version) and the simulator-free ROS scenarios in `neupan_cpp_ros/test` (smoke, closed loop, path overshoot, A\*). CI (`.github/workflows/ci.yml`) runs a format check, the libneupan build and tests, and colcon build/test on ROS 2 Humble on every push.
 
 
 

@@ -23,7 +23,6 @@
 #include "neupan/nrmp.hpp"
 #include "neupan/robot.hpp"
 #include "neupan/tensor_io.hpp"
-#include "reference_data.hpp"
 
 using namespace neupan;
 using Clock = std::chrono::steady_clock;
@@ -50,33 +49,56 @@ int main() {
   const std::string model = std::string(NEUPAN_MODEL_DIR) + "/diff_default.bin";
   const TensorFile tf = TensorFile::load(data + "/frames.nptf");
 
-  const int T = ref::scalarInt(tf, "meta.T");
-  const int n_frames = ref::scalarInt(tf, "meta.n_frames");
+  const int T = static_cast<int>(tf.at("meta.T")(0, 0));
+  const int n_frames = static_cast<int>(tf.at("meta.n_frames")(0, 0));
 
-  const auto robot = ref::robot(tf);
+  const Robot robot = Robot::diffRectangle(T, tf.at("meta.dt")(0, 0),
+                                           Vec2(8, 1), Vec2(8, 3), 1.6, 2.0);
   const DUNE dune(robot, model);
-  NRMP nrmp(robot, ref::nrmpParams(tf));
+
+  NRMPParams params;
+  params.max_num = static_cast<int>(tf.at("meta.max_num")(0, 0));
+  params.q_s = tf.at("meta.q_s").col(0);
+  params.p_u = tf.at("meta.p_u")(0, 0);
+  params.eta = tf.at("meta.eta")(0, 0);
+  params.d_max = tf.at("meta.d_max")(0, 0);
+  params.d_min = tf.at("meta.d_min")(0, 0);
+  params.ro_obs = tf.at("meta.ro_obs")(0, 0);
+  params.bk = tf.at("meta.bk")(0, 0);
+  NRMP nrmp(robot, params);
 
   struct Call {
     std::vector<Mat2X> pf, op, lam, sp;
     std::vector<Mat22> R;
     std::vector<Mat> mu;
-    NomRef nom;
+    Mat3X nom_s, ref_s;
+    Mat2X nom_u;
+    Vec ref_us;
   };
   std::vector<Call> calls;
 
+  char buf[64];
   for (int f = 0; f < n_frames; ++f) {
-    const int n_iters = ref::scalarInt(tf, ref::frameKey(f) + ".n_iters");
+    std::snprintf(buf, sizeof(buf), "f%02d", f);
+    const int n_iters =
+        static_cast<int>(tf.at(std::string(buf) + ".n_iters")(0, 0));
     for (int it = 0; it < n_iters; ++it) {
-      const std::string pre = ref::iterKey(f, it);
+      std::snprintf(buf, sizeof(buf), "f%02d_it%d", f, it);
+      const std::string pre = buf;
       Call c;
-      c.nom = ref::nomRef(tf, pre);
-      c.pf = ref::stages<Mat2X>(tf, pre, "pf", T);
-      c.R = ref::stages<Mat22>(tf, pre, "R", T);
-      c.op = ref::stages<Mat2X>(tf, pre, "op", T);
-      c.mu = ref::stages<Mat>(tf, pre, "mu", T);
-      c.lam = ref::stages<Mat2X>(tf, pre, "lam", T);
-      c.sp = ref::stages<Mat2X>(tf, pre, "sp", T);
+      c.nom_s = tf.at(pre + ".nom_s");
+      c.nom_u = tf.at(pre + ".nom_u");
+      c.ref_s = tf.at(pre + ".ref_s");
+      c.ref_us = tf.at(pre + ".ref_us").col(0);
+      for (int t = 0; t <= T; ++t) {
+        std::snprintf(buf, sizeof(buf), "_s%02d", t);
+        c.pf.push_back(tf.at(pre + ".pf" + buf));
+        c.R.push_back(tf.at(pre + ".R" + buf));
+        c.op.push_back(tf.at(pre + ".op" + buf));
+        c.mu.push_back(tf.at(pre + ".mu" + buf));
+        c.lam.push_back(tf.at(pre + ".lam" + buf));
+        c.sp.push_back(tf.at(pre + ".sp" + buf));
+      }
       calls.push_back(std::move(c));
     }
   }
@@ -89,8 +111,13 @@ int main() {
   std::vector<double> dune_us, nrmp_us, frame_us;
 
   // warm-up (first OSQP init included here, excluded from stats)
-  (void)nrmp.solve(calls[0].nom,
-                   nrmp.buildFaFb(calls[0].mu, calls[0].lam, calls[0].sp));
+  {
+    std::vector<Mat> fa;
+    std::vector<Vec> fb;
+    nrmp.buildFaFb(calls[0].mu, calls[0].lam, calls[0].sp, fa, fb);
+    (void)nrmp.solve(calls[0].nom_s, calls[0].nom_u, calls[0].ref_s,
+                     calls[0].ref_us, fa, fb);
+  }
 
   for (int rep = 0; rep < kRepeat; ++rep) {
     for (const Call& c : calls) {
@@ -99,9 +126,11 @@ int main() {
       dune_us.push_back(usSince(t0));
 
       const auto t1 = Clock::now();
-      const NRMP::Result res = nrmp.solve(
-          c.nom,
-          nrmp.buildFaFb(out.mu_list, out.lam_list, out.sort_point_list));
+      std::vector<Mat> fa;
+      std::vector<Vec> fb;
+      nrmp.buildFaFb(out.mu_list, out.lam_list, out.sort_point_list, fa, fb);
+      const NRMP::Result res =
+          nrmp.solve(c.nom_s, c.nom_u, c.ref_s, c.ref_us, fa, fb);
       nrmp_us.push_back(usSince(t1));
       frame_us.push_back(usSince(t0));
       if (!res.success) std::printf("warning: solve failed\n");

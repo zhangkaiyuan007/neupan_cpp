@@ -13,12 +13,11 @@
 #include "neupan/dune.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
-#include <utility>
 
-#include "neupan/log.hpp"
 #include "neupan/tensor_io.hpp"
 
 namespace neupan {
@@ -29,10 +28,11 @@ namespace {
 void checkCheckpointGeometry(const std::string& path, const TensorFile& tf,
                              const Mat& G, const Vec& h) {
   if (!tf.has("meta.G") || !tf.has("meta.h")) {
-    logWarning(path +
-               " carries no footprint metadata, so it cannot be checked "
-               "against the configured robot. Re-export with "
-               "tools/export_dune_weights.py to enable the check.");
+    std::fprintf(stderr,
+                 "[neupan] WARNING: %s carries no footprint metadata, so it "
+                 "cannot be checked against the configured robot. Re-export "
+                 "with tools/export_dune_weights.py to enable the check.\n",
+                 path.c_str());
     return;
   }
 
@@ -51,16 +51,13 @@ void checkCheckpointGeometry(const std::string& path, const TensorFile& tf,
 
 }  // namespace
 
-DUNE::DUNE(std::shared_ptr<const Robot> robot,
-           const std::string& checkpoint_path)
-    : robot_(std::move(robot)) {
+DUNE::DUNE(const Robot& robot, const std::string& checkpoint_path)
+    : G_(robot.G), h_(robot.h), T_(robot.T) {
   const TensorFile tf = TensorFile::load(checkpoint_path);
   mlp_ = MLP::fromTensors(tf);
-  if (mlp_.inputDim() != 2)
-    throw std::runtime_error("dune: checkpoint input must be 2-D points");
-  if (mlp_.outputDim() != robot_->G.rows())
+  if (mlp_.outputDim() != G_.rows())
     throw std::runtime_error("dune: checkpoint edge_dim mismatch with robot G");
-  checkCheckpointGeometry(checkpoint_path, tf, robot_->G, robot_->h);
+  checkCheckpointGeometry(checkpoint_path, tf, G_, h_);
 }
 
 DUNE::Output DUNE::forward(const std::vector<Mat2X>& point_flow,
@@ -94,21 +91,21 @@ DUNE::Output DUNE::forward(const std::vector<Mat2X>& point_flow,
     const Mat mu = total_mu.middleCols(off, n).cast<double>();
     off += n;
 
-    const Mat2X lam = -R_list[i] * robot_->G.transpose() * mu;
+    const Mat2X lam = -R_list[i] * G_.transpose() * mu;
 
     // distance_k = mu_k . (G p0_k - h)
     Vec distance(n);
-    const Mat gp = (robot_->G * point_flow[i]).colwise() - robot_->h;
-    for (Eigen::Index k = 0; k < n; ++k) distance(k) = mu.col(k).dot(gp.col(k));
+    const Mat gp = (G_ * point_flow[i]).colwise() - h_;
+    for (Eigen::Index k = 0; k < n; ++k)
+      distance(k) = mu.col(k).dot(gp.col(k));
 
     if (i == 0 && n > 0) out.min_distance = distance.minCoeff();
 
     std::vector<Eigen::Index> idx(n);
     std::iota(idx.begin(), idx.end(), 0);
-    std::stable_sort(idx.begin(), idx.end(),
-                     [&](Eigen::Index a, Eigen::Index b) {
-                       return distance(a) < distance(b);
-                     });
+    std::stable_sort(idx.begin(), idx.end(), [&](Eigen::Index a, Eigen::Index b) {
+      return distance(a) < distance(b);
+    });
 
     Mat mu_sorted(mu.rows(), n);
     Mat2X lam_sorted(2, n);

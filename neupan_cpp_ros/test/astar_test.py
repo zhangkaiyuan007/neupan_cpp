@@ -33,10 +33,9 @@ class AStarTest(Node):
         self.tf = StaticTransformBroadcaster(self)
         self._send_tf()
         self._publish_map()
-        # Resent each second until a path arrives: the latched map can reach
-        # the node after the first goal, which is then ignored.
-        self.create_timer(1.0, self._send_goal)
-        self.create_timer(6.0, self._finish)
+        self.create_timer(1.0, self._send_goal_once)
+        self.create_timer(4.0, self._finish)
+        self._goal_sent = False
 
     def _send_tf(self):
         # Both, since the node's default base_frame is base_link.
@@ -74,8 +73,8 @@ class AStarTest(Node):
         self.map_pub.publish(m)
         self.get_logger().info("published synthetic /map with wall + gap")
 
-    def _send_goal(self):
-        if self.got_path:
+    def _send_goal_once(self):
+        if self._goal_sent:
             return
         g = PoseStamped()
         g.header.frame_id = "map"
@@ -84,6 +83,7 @@ class AStarTest(Node):
         g.pose.position.y = 0.0
         g.pose.orientation.w = 1.0
         self.goal_pub.publish(g)
+        self._goal_sent = True
         self.get_logger().info("sent goal (4.0, 0.0)")
 
     def _on_path(self, msg):
@@ -92,7 +92,7 @@ class AStarTest(Node):
     def _finish(self):
         if not self.got_path:
             self.get_logger().error("FAIL: no /initial_path received")
-            sys.exit(1)
+            rclpy.shutdown(); sys.exit(1)
         xs = [p[0] for p in self.got_path]
         ys = [p[1] for p in self.got_path]
         max_y = max(ys)
@@ -106,18 +106,12 @@ class AStarTest(Node):
             f"path: {len(self.got_path)} wpts, start={self.got_path[0]}, "
             f"end={self.got_path[-1]}, max_y={max_y:.2f}, in_wall={in_wall}")
         self.get_logger().info("PASS" if ok else "FAIL: path did not detour cleanly")
-        sys.exit(0 if ok else 1)
+        rclpy.shutdown(); sys.exit(0 if ok else 1)
 
 
 def main():
     rclpy.init()
-    try:
-        # Callbacks finish with sys.exit(); rclpy.shutdown() inside a callback
-        # deadlocks on Humble, so shut down here once spin() unwinds.
-        rclpy.spin(AStarTest())
-    finally:
-        if rclpy.ok():
-            rclpy.shutdown()
+    rclpy.spin(AStarTest())
 
 
 if __name__ == "__main__":

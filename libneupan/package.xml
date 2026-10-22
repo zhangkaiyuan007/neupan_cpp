@@ -14,10 +14,6 @@
   <buildtool_depend>cmake</buildtool_depend>
   <depend>eigen</depend>
   <depend>yaml-cpp</depend>
-  <!-- OSQP and osqp-eigen have no rosdep keys; install them from source
-       (see README or .github/scripts/install_osqp.sh). -->
-
-  <test_depend>gtest</test_depend>
 
   <export>
     <build_type>cmake</build_type>

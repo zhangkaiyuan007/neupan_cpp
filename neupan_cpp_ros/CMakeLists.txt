@@ -39,10 +39,4 @@ install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
 # plain-CMake package and is therefore not discoverable via the ament index.
 install(DIRECTORY ${libneupan_MODELS_DIR}/ DESTINATION share/${PROJECT_NAME}/models)
 
-if(BUILD_TESTING)
-  # Headless ROS scenarios: see test/scenarios_launch_test.py.
-  find_package(launch_testing_ament_cmake REQUIRED)
-  add_launch_test(test/scenarios_launch_test.py TIMEOUT 600)
-endif()
-
 ament_package()

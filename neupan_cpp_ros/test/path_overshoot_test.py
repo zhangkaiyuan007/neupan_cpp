@@ -28,7 +28,6 @@ class Test(Node):
         self.goal_x = 4.0
         self.max_x = 0.0
         self.sent = False
-        self.last_sent_t = -1.0
 
         self.bc = TransformBroadcaster(self)
         self.scan_pub = self.create_publisher(LaserScan, "/scan", qos_profile_sensor_data)
@@ -72,10 +71,7 @@ class Test(Node):
         self._bcast()
         self.max_x = max(self.max_x, self.x)
         self.t += self.dt
-        # Resend until the robot moves, in case the node was not up yet.
-        moving = abs(self.v) > 1e-3 or abs(self.w) > 1e-3
-        if self.t > 1.0 and not moving and self.t - self.last_sent_t >= 1.0:
-            self.last_sent_t = self.t
+        if not self.sent and self.t > 1.0:
             self._pub_path()
             self.sent = True
             self.get_logger().info("published sparse /initial_path [0, 2, 4]")
@@ -90,7 +86,7 @@ class Test(Node):
                 f"RESULT final_x={self.x:.3f} max_x={self.max_x:.3f} "
                 f"overshoot={overshoot:+.3f} final_err={final_err:.3f} stopped={stopped}")
             self.get_logger().info("PASS" if ok else "FAIL: overshoot/err too large")
-            sys.exit(0 if ok else 1)
+            rclpy.shutdown(); sys.exit(0 if ok else 1)
 
     def _pub_scan(self):
         m = LaserScan()
@@ -106,13 +102,7 @@ class Test(Node):
 
 def main():
     rclpy.init()
-    try:
-        # Callbacks finish with sys.exit(); rclpy.shutdown() inside a callback
-        # deadlocks on Humble, so shut down here once spin() unwinds.
-        rclpy.spin(Test())
-    finally:
-        if rclpy.ok():
-            rclpy.shutdown()
+    rclpy.spin(Test())
 
 
 if __name__ == "__main__":

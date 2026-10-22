@@ -10,7 +10,7 @@
  * (at your option) any later version. See <https://www.gnu.org/licenses/>.
  */
 
-// A (season d=0 config) must be rejected at load; B (upstream margins) passes.
+// A (season d=0 config) must be rejected at load; B (upstream margins) must pass.
 
 #include <cmath>
 #include <cstdio>
@@ -70,11 +70,10 @@ Result rollout(const std::string& yaml, const std::string& model,
     ++r.steps;
     if (info.stop) ++r.stop_frames;
     if (verbose && i % 10 == 0) {
-      std::printf(
-          "    t=%4.1f s  pose=(%5.2f,%5.2f,%5.2f)  u=(%5.2f,%5.2f)  "
-          "min_dist=%6.3f %s\n",
-          i * dt, state(0), state(1), state(2), u(0), u(1), info.min_distance,
-          info.stop ? "STOP" : "");
+      std::printf("    t=%4.1f s  pose=(%5.2f,%5.2f,%5.2f)  u=(%5.2f,%5.2f)  "
+                  "min_dist=%6.3f %s\n",
+                  i * dt, state(0), state(1), state(2), u(0), u(1),
+                  info.min_distance, info.stop ? "STOP" : "");
     }
     if (info.arrive) {
       r.arrived = true;
@@ -109,18 +108,16 @@ void report(const char* name, const Result& r) {
 
 int main(int argc, char** argv) {
   if (argc < 4) {
-    std::printf(
-        "usage: %s <rejected.yaml> <valid.yaml> <model.bin> "
-        "[verbose_offset]\n",
-        argv[0]);
+    std::printf("usage: %s <rejected.yaml> <valid.yaml> <model.bin> "
+                "[verbose_offset]\n",
+                argv[0]);
     return 2;
   }
   const std::string cfg_a = argv[1], cfg_b = argv[2], model = argv[3];
 
-  std::printf(
-      "scenario: goal (%.1f, 0); obstacle box half=%.2f m at x=%.1f, "
-      "swept laterally; robot 0.5x0.5 diff\n",
-      kGoalX, kObstacleHalf, kObstacleX);
+  std::printf("scenario: goal (%.1f, 0); obstacle box half=%.2f m at x=%.1f, "
+              "swept laterally; robot 0.5x0.5 diff\n",
+              kGoalX, kObstacleHalf, kObstacleX);
   std::printf("A (must be rejected) = %s\nB (must still pass) = %s\n\n",
               cfg_a.c_str(), cfg_b.c_str());
 
@@ -130,8 +127,7 @@ int main(int argc, char** argv) {
     std::printf("A loaded without complaint - the clearance guard is gone\n\n");
   } catch (const std::exception& e) {
     // Only the config guard counts; a typo'd path must not pass as rejection.
-    a_rejected =
-        std::string(e.what()).find("neupan config") != std::string::npos;
+    a_rejected = std::string(e.what()).find("neupan config") != std::string::npos;
     std::printf("A %s: %s\n\n",
                 a_rejected ? "rejected by the config guard"
                            : "failed for an unrelated reason",
@@ -148,10 +144,9 @@ int main(int argc, char** argv) {
       b_arrived += b.arrived;
     }
 
-    std::printf(
-        "\nB reached the goal in %d/%zu runs; offsets 0.0 and 0.3 "
-        "block the reference line outright and need a global replan\n",
-        b_arrived, std::size(offsets));
+    std::printf("\nB reached the goal in %d/%zu runs; offsets 0.0 and 0.3 "
+                "block the reference line outright and need a global replan\n",
+                b_arrived, std::size(offsets));
 
     if (argc > 4) {
       const double off = std::atof(argv[4]);

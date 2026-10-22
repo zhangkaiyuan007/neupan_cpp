@@ -13,15 +13,12 @@
 #include "neupan/mlp.hpp"
 
 #include <stdexcept>
-#include <string>
 
 #include "neupan/tensor_io.hpp"
 
 namespace neupan {
 
-MLP MLP::load(const std::string& path) {
-  return fromTensors(TensorFile::load(path));
-}
+MLP MLP::load(const std::string& path) { return fromTensors(TensorFile::load(path)); }
 
 MLP MLP::fromTensors(const TensorFile& tf) {
   MLP mlp;
@@ -79,38 +76,7 @@ MLP MLP::fromTensors(const TensorFile& tf) {
 
   if (mlp.layers.empty())
     throw std::runtime_error("mlp: checkpoint has no layer records");
-  mlp.checkShapes();
   return mlp;
-}
-
-// A malformed checkpoint would otherwise surface as an out-of-bounds Eigen
-// product in forward(), which Release builds do not check.
-void MLP::checkShapes() const {
-  Eigen::Index dim = -1;  // feature size flowing into the layer, once known
-  for (size_t i = 0; i < layers.size(); ++i) {
-    const Layer& l = layers[i];
-    const std::string where = "mlp: layer " + std::to_string(i);
-    switch (l.type) {
-      case LayerType::Linear:
-        if (l.W.size() == 0 || l.b.size() != l.W.rows())
-          throw std::runtime_error(where +
-                                   " needs a weight and a matching bias");
-        if (dim >= 0 && l.W.cols() != dim)
-          throw std::runtime_error(where + " input size does not match");
-        dim = l.W.rows();
-        break;
-      case LayerType::LayerNorm:
-        if (l.gamma.size() == 0 || l.beta.size() != l.gamma.size())
-          throw std::runtime_error(where + " needs matching gamma and beta");
-        if (dim >= 0 && l.gamma.size() != dim)
-          throw std::runtime_error(where + " size does not match");
-        dim = l.gamma.size();
-        break;
-      case LayerType::Tanh:
-      case LayerType::ReLU:
-        break;
-    }
-  }
 }
 
 MatF MLP::forward(const MatF& X) const {
@@ -122,15 +88,16 @@ MatF MLP::forward(const MatF& X) const {
         break;
       case LayerType::LayerNorm: {
         // Per-sample (column) normalization, biased variance, torch semantics.
-        const auto dim = static_cast<float>(h.rows());
-        const Eigen::RowVectorXf mean = h.colwise().mean();
-        h.rowwise() -= mean;
-        const Eigen::RowVectorXf std_dev =
-            (h.array().square().colwise().sum() / dim + kLayerNormEps).sqrt();
-        h.array().rowwise() /= std_dev.array();
-        h = ((h.array().colwise() * layer.gamma.array()).colwise() +
-             layer.beta.array())
-                .matrix();
+        const Eigen::Index dim = h.rows();
+        for (Eigen::Index c = 0; c < h.cols(); ++c) {
+          const float mean = h.col(c).mean();
+          const float var = (h.col(c).array() - mean).square().sum() / dim;
+          h.col(c) = (((h.col(c).array() - mean) /
+                       std::sqrt(var + kLayerNormEps)) *
+                          layer.gamma.array() +
+                      layer.beta.array())
+                         .matrix();
+        }
         break;
       }
       case LayerType::Tanh:

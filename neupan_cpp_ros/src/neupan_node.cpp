@@ -13,12 +13,10 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,294 +28,347 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_msgs/msg/bool.hpp>
-#include <std_msgs/msg/color_rgba.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
-#include "msg_utils.hpp"
-#include "neupan/log.hpp"
 #include "neupan/neupan_planner.hpp"
-#include "neupan/safety_supervisor.hpp"
+
+using namespace std::chrono_literals;
 
 namespace {
 
-using neupan::InitialPath;
-using neupan::NeuPANPlanner;
-using neupan_ros::planarPose;
-using neupan_ros::quatToYaw;
+double quatToYaw(const geometry_msgs::msg::Quaternion& q) {
+  return std::atan2(2.0 * (q.w * q.z + q.x * q.y),
+                    1.0 - 2.0 * (q.z * q.z + q.y * q.y));
+}
 
-struct NodeParams {
-  std::string config_file, dune_checkpoint;
-  std::string map_frame, base_frame;
-  std::string lidar_frame;  // empty: the frame_id of each scan
-  double control_rate;
-  double marker_size, marker_z;
-  double scan_angle_min, scan_angle_max, scan_range_min, scan_range_max;
-  int scan_downsample;
-  bool flip_angle;
-  bool include_initial_path_direction;
-  neupan::SafetySupervisor::Options safety;
-
-  static NodeParams declare(rclcpp::Node& n) {
-    NodeParams p;
-    p.config_file = n.declare_parameter<std::string>("config_file", "");
-    p.dune_checkpoint = n.declare_parameter<std::string>("dune_checkpoint", "");
-    p.map_frame = n.declare_parameter<std::string>("map_frame", "map");
-    p.base_frame = n.declare_parameter<std::string>("base_frame", "base_link");
-    p.lidar_frame = n.declare_parameter<std::string>("lidar_frame", "");
-    p.control_rate = n.declare_parameter<double>("control_rate", 50.0);
-    p.marker_size = n.declare_parameter<double>("marker_size", 0.05);
-    p.marker_z = n.declare_parameter<double>("marker_z", 1.0);
-    p.scan_angle_min = n.declare_parameter<double>("scan_angle_min", -3.14);
-    p.scan_angle_max = n.declare_parameter<double>("scan_angle_max", 3.14);
-    p.scan_range_min = n.declare_parameter<double>("scan_range_min", 0.0);
-    p.scan_range_max = n.declare_parameter<double>("scan_range_max", 5.0);
-    p.scan_downsample = n.declare_parameter<int>("scan_downsample", 1);
-    p.flip_angle = n.declare_parameter<bool>("flip_angle", false);
-    p.include_initial_path_direction =
-        n.declare_parameter<bool>("include_initial_path_direction", false);
-    p.safety.scan_timeout = n.declare_parameter<double>("scan_timeout", 0.5);
-    p.safety.solver_fail_grace =
-        n.declare_parameter<int>("solver_fail_grace", 5);
-    p.safety.stall_speed = n.declare_parameter<double>("stall_speed", 0.02);
-    p.safety.stall_timeout = n.declare_parameter<double>("stall_timeout", 3.0);
-
-    if (p.config_file.empty())
-      throw std::runtime_error("parameter 'config_file' is required");
-    if (p.dune_checkpoint.empty())
-      throw std::runtime_error(
-          "parameter 'dune_checkpoint' (.bin model) is required");
-    if (p.scan_downsample < 1)
-      throw std::runtime_error("scan_downsample must be >= 1");
-    if (!(p.control_rate > 0.0))
-      throw std::runtime_error("control_rate must be > 0");
-    return p;
-  }
-};
-
-std_msgs::msg::ColorRGBA rgb(int r, int g, int b) {
-  std_msgs::msg::ColorRGBA c;
-  c.r = r / 255.0f;
-  c.g = g / 255.0f;
-  c.b = b / 255.0f;
-  c.a = 1.0f;
-  return c;
+geometry_msgs::msg::Quaternion yawToQuat(double yaw) {
+  geometry_msgs::msg::Quaternion q;
+  q.z = std::sin(yaw / 2.0);
+  q.w = std::cos(yaw / 2.0);
+  return q;
 }
 
 }  // namespace
 
 class NeuPANNode : public rclcpp::Node {
  public:
-  NeuPANNode()
-      : Node("neupan_node"),
-        params_(NodeParams::declare(*this)),
-        supervisor_(params_.safety) {
-    neupan::setWarningHandler([logger = get_logger()](const std::string& m) {
-      RCLCPP_WARN(logger, "%s", m.c_str());
-    });
-    planner_ = std::make_unique<NeuPANPlanner>(
-        NeuPANPlanner::fromYaml(params_.config_file, params_.dune_checkpoint));
+  NeuPANNode() : Node("neupan_node") {
+    const auto config_file = declare_parameter<std::string>("config_file", "");
+    const auto dune_checkpoint =
+        declare_parameter<std::string>("dune_checkpoint", "");
+    map_frame_ = declare_parameter<std::string>("map_frame", "map");
+    base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
+    lidar_frame_ = declare_parameter<std::string>("lidar_frame", "laser_link");
+    marker_size_ = declare_parameter<double>("marker_size", 0.05);
+    marker_z_ = declare_parameter<double>("marker_z", 1.0);
+    scan_angle_min_ = declare_parameter<double>("scan_angle_min", -3.14);
+    scan_angle_max_ = declare_parameter<double>("scan_angle_max", 3.14);
+    scan_range_min_ = declare_parameter<double>("scan_range_min", 0.0);
+    scan_range_max_ = declare_parameter<double>("scan_range_max", 5.0);
+    scan_downsample_ = declare_parameter<int>("scan_downsample", 1);
+    flip_angle_ = declare_parameter<bool>("flip_angle", false);
+    include_initial_path_direction_ =
+        declare_parameter<bool>("include_initial_path_direction", false);
+    scan_timeout_ = declare_parameter<double>("scan_timeout", 0.5);
+    solver_fail_grace_ = declare_parameter<int>("solver_fail_grace", 5);
+    stall_speed_ = declare_parameter<double>("stall_speed", 0.02);
+    stall_timeout_ = declare_parameter<double>("stall_timeout", 3.0);
+    const double rate = declare_parameter<double>("control_rate", 50.0);
 
-    // Relative names, so a namespace or remap moves the whole interface.
-    vel_pub_ =
-        create_publisher<geometry_msgs::msg::Twist>("neupan_cmd_vel", 10);
-    plan_pub_ = create_publisher<nav_msgs::msg::Path>("neupan_plan", 10);
+    if (scan_downsample_ < 1)
+      throw std::runtime_error("scan_downsample must be >= 1");
+
+    if (config_file.empty())
+      throw std::runtime_error("parameter 'config_file' is required");
+    if (dune_checkpoint.empty())
+      throw std::runtime_error(
+          "parameter 'dune_checkpoint' (.bin model) is required");
+
+    planner_ = std::make_unique<neupan::NeuPANPlanner>(
+        neupan::NeuPANPlanner::fromYaml(config_file, dune_checkpoint));
+
+    vel_pub_ = create_publisher<geometry_msgs::msg::Twist>("/neupan_cmd_vel", 10);
+    plan_pub_ = create_publisher<nav_msgs::msg::Path>("/neupan_plan", 10);
     ref_state_pub_ =
-        create_publisher<nav_msgs::msg::Path>("neupan_ref_state", 10);
-    // Latched and published only when the path changes.
-    ref_path_pub_ = create_publisher<nav_msgs::msg::Path>(
-        "neupan_initial_path", rclcpp::QoS(1).transient_local());
+        create_publisher<nav_msgs::msg::Path>("/neupan_ref_state", 10);
+    ref_path_pub_ =
+        create_publisher<nav_msgs::msg::Path>("/neupan_initial_path", 10);
     dune_markers_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
-        "dune_point_markers", 10);
+        "/dune_point_markers", 10);
     nrmp_markers_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
-        "nrmp_point_markers", 10);
+        "/nrmp_point_markers", 10);
     robot_marker_pub_ =
-        create_publisher<visualization_msgs::msg::Marker>("robot_marker", 10);
-    // Published every cycle: a decision layer may drive its chassis off it.
-    arrive_pub_ = create_publisher<std_msgs::msg::Bool>("neupan_arrive", 10);
+        create_publisher<visualization_msgs::msg::Marker>("/robot_marker", 10);
+    // A decision layer may drive its chassis output off this, so publish every cycle.
+    arrive_pub_ = create_publisher<std_msgs::msg::Bool>("/neupan_arrive", 10);
     diag_pub_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
-        "neupan_diagnostics", 10);
+        "/neupan_diagnostics", 10);
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 
     scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
-        "scan", rclcpp::SensorDataQoS(),
+        "/scan", rclcpp::SensorDataQoS(),
         [this](sensor_msgs::msg::LaserScan::ConstSharedPtr msg) {
           scanCallback(*msg);
         });
     path_sub_ = create_subscription<nav_msgs::msg::Path>(
-        "initial_path", 10, [this](nav_msgs::msg::Path::ConstSharedPtr msg) {
+        "/initial_path", 10, [this](nav_msgs::msg::Path::ConstSharedPtr msg) {
           pathCallback(*msg);
         });
     waypoints_sub_ = create_subscription<nav_msgs::msg::Path>(
-        "neupan_waypoints", 10,
+        "/neupan_waypoints", 10,
         [this](nav_msgs::msg::Path::ConstSharedPtr msg) {
           waypointsCallback(*msg);
         });
     goal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-        "neupan_goal", 10,
+        "/neupan_goal", 10,
         [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr msg) {
           goalCallback(*msg);
         });
 
     timer_ = create_wall_timer(
-        std::chrono::duration<double>(1.0 / params_.control_rate),
-        [this] { run(); });
+        std::chrono::duration<double>(1.0 / rate), [this] { run(); });
 
     RCLCPP_INFO(get_logger(), "neupan_cpp node ready (config: %s)",
-                params_.config_file.c_str());
+                config_file.c_str());
   }
 
-  ~NeuPANNode() override { neupan::setWarningHandler(nullptr); }
-
  private:
-  // ---- control cycle ----
+  std::optional<neupan::Vec3> lookupPose(const std::string& target,
+                                         const std::string& source) {
+    try {
+      const auto tfs = tf_buffer_->lookupTransform(target, source,
+                                                   tf2::TimePointZero);
+      return neupan::Vec3(tfs.transform.translation.x,
+                          tfs.transform.translation.y,
+                          quatToYaw(tfs.transform.rotation));
+    } catch (const tf2::TransformException& ex) {
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                           "waiting for tf %s -> %s: %s", target.c_str(),
+                           source.c_str(), ex.what());
+      return std::nullopt;
+    }
+  }
+
+  // Publishing nothing is not a stop: consumers hold the last command.
+  void halt(const char* why) {
+    vel_pub_->publish(geometry_msgs::msg::Twist());
+    publishArrive(false);
+    publishStatus(diagnostic_msgs::msg::DiagnosticStatus::WARN, why, {});
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "%s", why);
+  }
 
   void run() {
-    const rclcpp::Time stamp = now();
-
-    const auto state = lookupPose(params_.base_frame, tf2::TimePointZero);
+    const auto state = lookupPose(map_frame_, base_frame_);
     if (!state) {
-      halt("no robot pose (TF map->base), holding still", stamp);
+      halt("no robot pose (TF map->base), holding still");
       return;
     }
     robot_state_ = *state;
     have_state_ = true;
 
-    if (supervisor_.scanStale(stamp.seconds())) {
+    if (scanIsStale()) {
       obstacle_points_.resize(2, 0);
-      halt("scan is stale, obstacles unknown, holding still", stamp);
+      halt("scan is stale, obstacles unknown, holding still");
       return;
     }
 
-    if (!planner_->ensurePath(robot_state_)) {
-      halt("waiting for neupan initial path", stamp);
+    auto& ipath = planner_->ipath();
+    if (ipath.hasConfiguredWaypoints() && !ipath.hasPath())
+      ipath.setIpathWithState(robot_state_);
+
+    if (!ipath.hasPath()) {
+      halt("waiting for neupan initial path");
       return;
     }
-    publishInitialPathIfChanged(stamp);
+
+    publishInitialPath();
 
     if (obstacle_points_.cols() == 0)
       RCLCPP_WARN_THROTTLE(
           get_logger(), *get_clock(), 1000,
           "no obstacle points, only path tracking will be performed");
 
-    NeuPANPlanner::Info info;
+    neupan::NeuPANPlanner::Info info;
     const neupan::Vec2 action =
         planner_->forward(robot_state_, obstacle_points_, info);
-    const neupan::Vec2 cmd = supervisor_.filter(info, action, stamp.seconds());
-    logCycle(info);
 
-    publishCommand(cmd);
-    publishArrive(info.arrive);
-    publishDiagnostics(info, cmd, stamp);
-    publishVisualization(info, stamp);
-  }
-
-  // Publishing nothing is not a stop: consumers hold the last command.
-  void halt(const char* why, const rclcpp::Time& stamp) {
-    publishCommand(neupan::Vec2::Zero());
-    publishArrive(false);
-    publishStatus(diagnostic_msgs::msg::DiagnosticStatus::WARN, why, {}, stamp);
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "%s", why);
-  }
-
-  void logCycle(const NeuPANPlanner::Info& info) {
     if (info.arrive)
       RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
                            "arrive at the target");
     if (info.stop)
-      RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 500,
-          "neupan stop, min distance %.3f below threshold %.3f",
-          info.min_distance, planner_->collisionThreshold());
-    if (supervisor_.solverGaveUp())
-      RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 500,
-          "%d consecutive unsolved cycles (osqp status %d), stopping",
-          supervisor_.consecutiveUnsolved(), info.solver_status);
-    if (supervisor_.stalled())
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500,
+                           "neupan stop, min distance %.3f below threshold %.3f",
+                           info.min_distance, planner_->collisionThreshold());
+
+    geometry_msgs::msg::Twist twist;
+    if (!info.stop && !info.arrive && !solverGaveUp(info)) {
+      twist.linear.x = action(0);
+      twist.angular.z = action(1);
+    }
+    vel_pub_->publish(twist);
+    publishArrive(info.arrive);
+    updateStall(twist, info.arrive);
+    publishDiagnostics(info, twist);
+
+    if (info.opt_s.cols() > 0) plan_pub_->publish(matToPath(info.opt_s));
+    if (info.ref_s.cols() > 0) ref_state_pub_->publish(matToPath(info.ref_s));
+    publishPointMarkers(info.dune_points, dune_markers_pub_, 160, 32, 240);
+    publishPointMarkers(info.nrmp_points, nrmp_markers_pub_, 255, 128, 0);
+    publishRobotMarker();
+  }
+
+  // A run of unsolved cycles means driving blind on a nominal with no avoidance.
+  bool solverGaveUp(const neupan::NeuPANPlanner::Info& info) {
+    if (info.solved) {
+      consecutive_unsolved_ = 0;
+      return false;
+    }
+    ++consecutive_unsolved_;
+    if (consecutive_unsolved_ <= solver_fail_grace_) return false;
+
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 500,
+                         "%d consecutive unsolved cycles (osqp status %d), stopping",
+                         consecutive_unsolved_, info.solver_status);
+    return true;
+  }
+
+  bool scanIsStale() const {
+    if (!scan_seen_) return false;  // never had a scan: the no-points path warns
+    return (now() - last_scan_time_).seconds() > scan_timeout_;
+  }
+
+  void publishArrive(bool arrived) {
+    std_msgs::msg::Bool msg;
+    msg.data = arrived;
+    arrive_pub_->publish(msg);
+  }
+
+  // Idling at the clearance in front of a blocked path sets neither stop nor arrive.
+  void updateStall(const geometry_msgs::msg::Twist& cmd, bool arrived) {
+    const bool moving = std::abs(cmd.linear.x) > stall_speed_ ||
+                        std::abs(cmd.angular.z) > stall_speed_;
+    // First planned cycle starts the clock; the zero epoch would flag instantly.
+    const bool first = last_progress_time_.nanoseconds() == 0;
+    if (moving || arrived || first) {
+      last_progress_time_ = now();
+      stalled_ = false;
+      return;
+    }
+    if ((now() - last_progress_time_).seconds() > stall_timeout_) {
+      stalled_ = true;
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
                            "stalled for %.1f s without arriving; the path may "
                            "be blocked and need a global replan",
-                           params_.safety.stall_timeout);
-  }
-
-  // Pose of `frame` in the map frame at `time` (TimePointZero: latest).
-  std::optional<neupan::Vec3> lookupPose(const std::string& frame,
-                                         const tf2::TimePoint& time) {
-    try {
-      const auto tfs =
-          tf_buffer_->lookupTransform(params_.map_frame, frame, time);
-      return neupan::Vec3(tfs.transform.translation.x,
-                          tfs.transform.translation.y,
-                          quatToYaw(tfs.transform.rotation));
-    } catch (const tf2::TransformException& ex) {
-      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
-                           "waiting for tf %s -> %s: %s",
-                           params_.map_frame.c_str(), frame.c_str(), ex.what());
-      return std::nullopt;
+                           stall_timeout_);
     }
   }
 
-  // ---- inputs ----
+  void publishStatus(
+      uint8_t level, const std::string& message,
+      const std::vector<std::pair<std::string, std::string>>& values) {
+    diagnostic_msgs::msg::DiagnosticStatus st;
+    st.name = "neupan";
+    st.hardware_id = base_frame_;
+    st.level = level;
+    st.message = message;
+    for (const auto& [k, v] : values) {
+      diagnostic_msgs::msg::KeyValue e;
+      e.key = k;
+      e.value = v;
+      st.values.push_back(e);
+    }
+    diagnostic_msgs::msg::DiagnosticArray arr;
+    arr.header.stamp = now();
+    arr.status.push_back(st);
+    diag_pub_->publish(arr);
+  }
+
+  void publishDiagnostics(const neupan::NeuPANPlanner::Info& info,
+                          const geometry_msgs::msg::Twist& cmd) {
+    using diagnostic_msgs::msg::DiagnosticStatus;
+    uint8_t level = DiagnosticStatus::OK;
+    std::string message = "tracking";
+    if (info.arrive) {  // arrival skips the solve, so check it first
+      message = "arrived";
+    } else if (stalled_ || consecutive_unsolved_ > solver_fail_grace_) {
+      level = DiagnosticStatus::ERROR;
+      message = stalled_ ? "stalled" : "solver failing";
+    } else if (info.stop || !info.solved) {
+      level = DiagnosticStatus::WARN;
+      message = info.stop ? "stopped at collision threshold" : "unsolved";
+    }
+
+    publishStatus(
+        level, message,
+        {{"solved", info.solved ? "true" : "false"},
+         {"solver_status", std::to_string(info.solver_status)},
+         {"consecutive_unsolved", std::to_string(consecutive_unsolved_)},
+         {"min_distance", std::to_string(info.min_distance)},
+         {"obstacle_points", std::to_string(obstacle_points_.cols())},
+         {"stalled", stalled_ ? "true" : "false"},
+         {"cmd_v", std::to_string(cmd.linear.x)},
+         {"cmd_w", std::to_string(cmd.angular.z)}});
+  }
 
   void scanCallback(const sensor_msgs::msg::LaserScan& msg) {
     if (!have_state_) return;
 
-    // The sensor pose when the scan was taken, so a moving robot does not
-    // smear the points; the latest pose if TF has not caught up yet.
-    const std::string& frame =
-        params_.lidar_frame.empty() ? msg.header.frame_id : params_.lidar_frame;
-    const tf2::TimePoint scan_time = tf2_ros::fromMsg(msg.header.stamp);
-    std::optional<neupan::Vec3> lidar_pose;
-    if (scan_time != tf2::TimePointZero &&
-        tf_buffer_->canTransform(params_.map_frame, frame, scan_time))
-      lidar_pose = lookupPose(frame, scan_time);
-    if (!lidar_pose) lidar_pose = lookupPose(frame, tf2::TimePointZero);
+    const auto lidar_pose = lookupPose(map_frame_, lidar_frame_);
     if (!lidar_pose) return;
 
-    supervisor_.recordScan(now().seconds());
+    last_scan_time_ = now();
+    scan_seen_ = true;
 
     const int n = static_cast<int>(msg.ranges.size());
+    std::vector<double> xs, ys;
+    xs.reserve(n);
+    ys.reserve(n);
+
     // Deriving the increment from the range divides by one beam too few.
     const double angle_inc =
         msg.angle_increment != 0.0f
             ? msg.angle_increment
             : (n > 1 ? (msg.angle_max - msg.angle_min) / (n - 1) : 0.0);
-
-    const double c = std::cos((*lidar_pose)(2)), s = std::sin((*lidar_pose)(2));
-    neupan::Mat2X pts(2, n);
-    int kept = 0;
-    for (int i = 0; i < n; i += params_.scan_downsample) {
+    for (int i = 0; i < n; ++i) {
+      if (i % scan_downsample_ != 0) continue;
       const double r = msg.ranges[i];
-      const double angle = params_.flip_angle ? msg.angle_max - i * angle_inc
-                                              : msg.angle_min + i * angle_inc;
-      // Written so that NaN ranges (no return) fail the test.
-      const bool keep =
-          r >= params_.scan_range_min && r <= params_.scan_range_max &&
-          angle > params_.scan_angle_min && angle < params_.scan_angle_max;
-      if (!keep) continue;
-      const double x = r * std::cos(angle), y = r * std::sin(angle);
-      pts(0, kept) = c * x - s * y + (*lidar_pose)(0);
-      pts(1, kept) = s * x + c * y + (*lidar_pose)(1);
-      ++kept;
+      const double angle = flip_angle_ ? msg.angle_max - i * angle_inc
+                                       : msg.angle_min + i * angle_inc;
+      if (r >= scan_range_min_ && r <= scan_range_max_ &&
+          angle > scan_angle_min_ && angle < scan_angle_max_) {
+        xs.push_back(r * std::cos(angle));
+        ys.push_back(r * std::sin(angle));
+      }
     }
-    pts.conservativeResize(2, kept);
+
+    if (xs.empty()) {
+      obstacle_points_.resize(2, 0);
+      return;
+    }
+
+    const double cy = std::cos((*lidar_pose)(2)), sy = std::sin((*lidar_pose)(2));
+    neupan::Mat2X pts(2, xs.size());
+    for (size_t i = 0; i < xs.size(); ++i) {
+      pts(0, i) = cy * xs[i] - sy * ys[i] + (*lidar_pose)(0);
+      pts(1, i) = sy * xs[i] + cy * ys[i] + (*lidar_pose)(1);
+    }
     obstacle_points_ = std::move(pts);
   }
 
   // Path poses -> [x, y, theta, gear]; theta from the points gradient unless
   // include_initial_path_direction is set (as upstream).
-  std::vector<InitialPath::PathPoint> pathMsgToPoints(
+  std::vector<neupan::InitialPath::PathPoint> pathMsgToPoints(
       const nav_msgs::msg::Path& msg) const {
-    std::vector<InitialPath::PathPoint> out;
+    std::vector<neupan::InitialPath::PathPoint> out;
     const size_t n = msg.poses.size();
     out.reserve(n);
     for (size_t i = 0; i < n; ++i) {
       const auto& p = msg.poses[i].pose;
       double theta;
-      if (params_.include_initial_path_direction) {
+      if (include_initial_path_direction_) {
         theta = quatToYaw(p.orientation);
       } else if (i + 1 < n) {
         const auto& p2 = msg.poses[i + 1].pose;
@@ -341,7 +392,7 @@ class NeuPANNode : public rclcpp::Node {
                          msg.poses.size());
 
     // Replacing rather than resetting: a resetting replan is a cold start.
-    if (planner_->hasPath() && have_state_) {
+    if (planner_->ipath().hasPath() && have_state_) {
       planner_->replaceInitialPath(pathMsgToPoints(msg), robot_state_);
     } else {
       planner_->setInitialPath(pathMsgToPoints(msg));
@@ -353,7 +404,7 @@ class NeuPANNode : public rclcpp::Node {
   void waypointsCallback(const nav_msgs::msg::Path& msg) {
     if (!have_state_ || msg.poses.empty()) return;
 
-    // Identical republished waypoints must not cold-reset the planner.
+    // Republished identical waypoints must not cold-reset the planner each tick.
     const auto pts = pathMsgToPoints(msg);
     if (samePoints(pts, last_waypoints_)) return;
     last_waypoints_ = pts;
@@ -368,8 +419,9 @@ class NeuPANNode : public rclcpp::Node {
     publishArrive(false);
   }
 
-  static bool samePoints(const std::vector<InitialPath::PathPoint>& a,
-                         const std::vector<InitialPath::PathPoint>& b) {
+  static bool samePoints(
+      const std::vector<neupan::InitialPath::PathPoint>& a,
+      const std::vector<neupan::InitialPath::PathPoint>& b) {
     if (a.size() != b.size()) return false;
     for (size_t i = 0; i < a.size(); ++i)
       if ((a[i] - b[i]).cwiseAbs().maxCoeff() > 1e-9) return false;
@@ -386,166 +438,101 @@ class NeuPANNode : public rclcpp::Node {
     planner_->reset();
   }
 
-  // ---- outputs ----
-
-  void publishCommand(const neupan::Vec2& cmd) {
-    geometry_msgs::msg::Twist twist;
-    twist.linear.x = cmd(0);
-    twist.angular.z = cmd(1);
-    vel_pub_->publish(twist);
-  }
-
-  void publishArrive(bool arrived) {
-    std_msgs::msg::Bool msg;
-    msg.data = arrived;
-    arrive_pub_->publish(msg);
-  }
-
-  void publishStatus(
-      uint8_t level, const std::string& message,
-      const std::vector<std::pair<std::string, std::string>>& values,
-      const rclcpp::Time& stamp) {
-    diagnostic_msgs::msg::DiagnosticStatus st;
-    st.name = "neupan";
-    st.hardware_id = params_.base_frame;
-    st.level = level;
-    st.message = message;
-    for (const auto& [k, v] : values) {
-      diagnostic_msgs::msg::KeyValue e;
-      e.key = k;
-      e.value = v;
-      st.values.push_back(e);
-    }
-    diagnostic_msgs::msg::DiagnosticArray arr;
-    arr.header.stamp = stamp;
-    arr.status.push_back(st);
-    diag_pub_->publish(arr);
-  }
-
-  void publishDiagnostics(const NeuPANPlanner::Info& info,
-                          const neupan::Vec2& cmd, const rclcpp::Time& stamp) {
-    using diagnostic_msgs::msg::DiagnosticStatus;
-    using Level = neupan::SafetySupervisor::Level;
-    const auto status = supervisor_.status(info);
-    const uint8_t level = status.level == Level::Error ? DiagnosticStatus::ERROR
-                          : status.level == Level::Warn ? DiagnosticStatus::WARN
-                                                        : DiagnosticStatus::OK;
-    const auto flag = [](bool b) { return b ? "true" : "false"; };
-
-    publishStatus(level, status.message,
-                  {{"solved", flag(info.solved)},
-                   {"solver_status", std::to_string(info.solver_status)},
-                   {"consecutive_unsolved",
-                    std::to_string(supervisor_.consecutiveUnsolved())},
-                   {"min_distance", std::to_string(info.min_distance)},
-                   {"obstacle_points", std::to_string(obstacle_points_.cols())},
-                   {"stalled", flag(supervisor_.stalled())},
-                   {"cmd_v", std::to_string(cmd(0))},
-                   {"cmd_w", std::to_string(cmd(1))}},
-                  stamp);
-  }
-
-  void publishInitialPathIfChanged(const rclcpp::Time& stamp) {
-    const int revision = planner_->ipath().revision();
-    if (revision == published_path_revision_) return;
-    published_path_revision_ = revision;
-
-    nav_msgs::msg::Path msg;
-    msg.header = header(stamp);
-    for (const auto& p : planner_->ipath().initialPath())
-      msg.poses.push_back(planarPose(msg.header, p(0), p(1), p(2)));
-    ref_path_pub_->publish(msg);
-  }
-
-  // Visualization only; skipped for topics nobody is listening to.
-  void publishVisualization(const NeuPANPlanner::Info& info,
-                            const rclcpp::Time& stamp) {
-    if (plan_pub_->get_subscription_count() > 0 && info.opt_s.cols() > 0)
-      plan_pub_->publish(statesToPath(info.opt_s, stamp));
-    if (ref_state_pub_->get_subscription_count() > 0 && info.ref_s.cols() > 0)
-      ref_state_pub_->publish(statesToPath(info.ref_s, stamp));
-    publishPointMarkers(info.dune_points, *dune_markers_pub_, rgb(160, 32, 240),
-                        stamp);
-    publishPointMarkers(info.nrmp_points, *nrmp_markers_pub_, rgb(255, 128, 0),
-                        stamp);
-    if (robot_marker_pub_->get_subscription_count() > 0)
-      publishRobotMarker(stamp);
-  }
-
-  std_msgs::msg::Header header(const rclcpp::Time& stamp) const {
-    std_msgs::msg::Header h;
-    h.frame_id = params_.map_frame;
-    h.stamp = stamp;
-    return h;
-  }
-
-  nav_msgs::msg::Path statesToPath(const neupan::Mat3X& states,
-                                   const rclcpp::Time& stamp) const {
+  nav_msgs::msg::Path matToPath(const neupan::Mat3X& states) {
     nav_msgs::msg::Path path;
-    path.header = header(stamp);
-    for (Eigen::Index i = 0; i < states.cols(); ++i)
-      path.poses.push_back(
-          planarPose(path.header, states(0, i), states(1, i), states(2, i)));
+    path.header.frame_id = map_frame_;
+    path.header.stamp = now();
+    for (Eigen::Index i = 0; i < states.cols(); ++i) {
+      geometry_msgs::msg::PoseStamped ps;
+      ps.header.frame_id = map_frame_;
+      ps.pose.position.x = states(0, i);
+      ps.pose.position.y = states(1, i);
+      ps.pose.orientation = yawToQuat(states(2, i));
+      path.poses.push_back(ps);
+    }
     return path;
   }
 
-  // One CUBE_LIST marker replaced every cycle. An empty set deletes it, so
-  // points from an earlier cycle never linger in RViz.
-  void publishPointMarkers(
-      const neupan::Mat2X& points,
-      rclcpp::Publisher<visualization_msgs::msg::MarkerArray>& pub,
-      const std_msgs::msg::ColorRGBA& color, const rclcpp::Time& stamp) {
-    if (pub.get_subscription_count() == 0) return;
-    visualization_msgs::msg::Marker m;
-    m.header = header(stamp);
-    m.id = 0;
-    if (points.cols() == 0) {
-      m.action = visualization_msgs::msg::Marker::DELETE;
-    } else {
-      m.action = visualization_msgs::msg::Marker::ADD;
-      m.type = visualization_msgs::msg::Marker::CUBE_LIST;
-      m.scale.x = m.scale.y = m.scale.z = params_.marker_size;
-      m.color = color;
-      m.pose.orientation.w = 1.0;
-      m.points.resize(points.cols());
-      for (Eigen::Index i = 0; i < points.cols(); ++i) {
-        m.points[i].x = points(0, i);
-        m.points[i].y = points(1, i);
-        m.points[i].z = 0.3;
-      }
+  void publishInitialPath() {
+    const auto& path = planner_->ipath().initialPath();
+    nav_msgs::msg::Path msg;
+    msg.header.frame_id = map_frame_;
+    msg.header.stamp = now();
+    for (const auto& p : path) {
+      geometry_msgs::msg::PoseStamped ps;
+      ps.header.frame_id = map_frame_;
+      ps.pose.position.x = p(0);
+      ps.pose.position.y = p(1);
+      ps.pose.orientation = yawToQuat(p(2));
+      msg.poses.push_back(ps);
     }
-    visualization_msgs::msg::MarkerArray arr;
-    arr.markers.push_back(std::move(m));
-    pub.publish(arr);
+    ref_path_pub_->publish(msg);
   }
 
-  void publishRobotMarker(const rclcpp::Time& stamp) {
+  void publishPointMarkers(
+      const neupan::Mat2X& points,
+      const rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr&
+          pub,
+      int r, int g, int b) {
+    if (points.cols() == 0) return;
+    visualization_msgs::msg::MarkerArray arr;
+    for (Eigen::Index i = 0; i < points.cols(); ++i) {
+      visualization_msgs::msg::Marker m;
+      m.header.frame_id = map_frame_;
+      m.header.stamp = now();
+      m.id = static_cast<int>(i);
+      m.type = visualization_msgs::msg::Marker::CUBE;
+      m.scale.x = m.scale.y = m.scale.z = marker_size_;
+      m.color.a = 1.0;
+      m.color.r = r / 255.0f;
+      m.color.g = g / 255.0f;
+      m.color.b = b / 255.0f;
+      m.pose.position.x = points(0, i);
+      m.pose.position.y = points(1, i);
+      m.pose.position.z = 0.3;
+      m.pose.orientation.w = 1.0;
+      arr.markers.push_back(m);
+    }
+    pub->publish(arr);
+  }
+
+  void publishRobotMarker() {
     const auto& cfg = planner_->config();
     visualization_msgs::msg::Marker m;
-    m.header = header(stamp);
+    m.header.frame_id = map_frame_;
+    m.header.stamp = now();
     m.id = 0;
     m.type = visualization_msgs::msg::Marker::CUBE;
-    m.color = rgb(0, 255, 0);
+    m.color.a = 1.0;
+    m.color.g = 1.0;
     m.scale.x = cfg.length;
     m.scale.y = cfg.width;
-    m.scale.z = params_.marker_z;
-    m.pose =
-        planarPose(m.header, robot_state_(0), robot_state_(1), robot_state_(2))
-            .pose;
+    m.scale.z = marker_z_;
+    m.pose.position.x = robot_state_(0);
+    m.pose.position.y = robot_state_(1);
+    m.pose.orientation = yawToQuat(robot_state_(2));
     robot_marker_pub_->publish(m);
   }
 
-  // ---- state ----
+  std::unique_ptr<neupan::NeuPANPlanner> planner_;
 
-  const NodeParams params_;
-  neupan::SafetySupervisor supervisor_;
-  std::unique_ptr<NeuPANPlanner> planner_;
+  std::string map_frame_, base_frame_, lidar_frame_;
+  double marker_size_, marker_z_;
+  double scan_angle_min_, scan_angle_max_, scan_range_min_, scan_range_max_;
+  int scan_downsample_;
+  bool flip_angle_, include_initial_path_direction_;
+  double scan_timeout_, stall_speed_, stall_timeout_;
+  int solver_fail_grace_;
+
+  int consecutive_unsolved_ = 0;
+  bool scan_seen_ = false, stalled_ = false;
+  rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_progress_time_{0, 0, RCL_ROS_TIME};
+  std::vector<neupan::InitialPath::PathPoint> last_waypoints_;
 
   neupan::Vec3 robot_state_ = neupan::Vec3::Zero();
   bool have_state_ = false;
   neupan::Mat2X obstacle_points_ = neupan::Mat2X(2, 0);
-  std::vector<InitialPath::PathPoint> last_waypoints_;
-  int published_path_revision_ = -1;
 
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -554,8 +541,7 @@ class NeuPANNode : public rclcpp::Node {
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr plan_pub_, ref_state_pub_,
       ref_path_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
-      dune_markers_pub_,
-      nrmp_markers_pub_;
+      dune_markers_pub_, nrmp_markers_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr arrive_pub_;
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
