@@ -12,6 +12,7 @@
 
 #include "neupan/initial_path.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -278,6 +279,24 @@ InitialPath::NomRef InitialPath::generateNomRefState(
 
   Vec3 ref_state = curve[point_index_].head<3>();
   int ref_index = point_index_;
+  if (opts_.projected_reference) {
+    double best = std::numeric_limits<double>::infinity();
+    const int last = std::min(point_index_ + opts_.ind_range, n - 1);
+    for (int i = std::max(point_index_ - 1, 0); i < last; ++i) {
+      const Vec2 a = curve[i].head<2>(), d = curve[i + 1].head<2>() - a;
+      const double u =
+          d.squaredNorm() > 0.0
+              ? std::clamp((state.head<2>() - a).dot(d) / d.squaredNorm(), 0.0, 1.0)
+              : 0.0;
+      const Vec2 p = a + u * d;
+      const double dist = (state.head<2>() - p).norm();
+      if (dist < best) {
+        best = dist;
+        ref_state << p, curve[i](2);
+        ref_index = i;
+      }
+    }
+  }
   Vec3 pre_state = state;
 
   NomRef out;
@@ -293,7 +312,11 @@ InitialPath::NomRef InitialPath::generateNomRefState(
   const double ref_speed_forward = ref_speed * dt_;
 
   for (int t = 0; t < T_; ++t) {
-    if (ref_speed_forward >= interval_) {
+    if (opts_.projected_reference) {
+      ref_state = findInteractionPoint(ref_state, ref_index,
+                                       ref_speed_forward);
+      if (ref_index > n - 2) gear(t) = 0.0;  // at the end of the path
+    } else if (ref_speed_forward >= interval_) {
       const int inc = static_cast<int>(ref_speed_forward / interval_);
       ref_index += inc;
       if (ref_index > n - 1) {

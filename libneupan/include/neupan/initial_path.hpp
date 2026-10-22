@@ -33,6 +33,11 @@ class InitialPath {
     double close_threshold = 0.1;
     int ind_range = 10;
     int arrive_index_threshold = 1;
+    // The reference starts at the robot's projection on the path and steps
+    // exactly ref_speed * dt along it. Upstream starts at the first path point
+    // within close_threshold, up to a point behind the robot, and the plan
+    // zigzags at full speed to fall back to it.
+    bool projected_reference = false;
   };
 
   using PathPoint = Eigen::Vector4d;  // x, y, theta, gear

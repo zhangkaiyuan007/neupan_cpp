@@ -11,9 +11,11 @@
  */
 
 #include <gtest/gtest.h>
+#include <yaml-cpp/yaml.h>
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <optional>
 
 #include "neupan/neupan_planner.hpp"
@@ -92,4 +94,35 @@ TEST(Omni, CommandBoundsTheChange) {
   EXPECT_LE(run.max_change, std::sqrt(5.0) * run.acce_bound + 1e-6);
   EXPECT_LT(run.miss, 0.3);
   EXPECT_GT(run.min_distance, 0.0);
+}
+
+// Driving down a straight path from 5 cm to its left, between two of its
+// points (ref_speed * dt = 0.4 m apart here), with the state and speed
+// weights of neupan_cpp_ros/config/sentry_omni.yaml: the largest speed
+// towards the left once back, i.e. the overshoot.
+double overshoot(bool projected) {
+  YAML::Node y = YAML::LoadFile(kData + "/replay_omni_planner.yaml");
+  y["ipath"]["projected_reference"] = projected;
+  y["adjust"]["q_s"] = 1.0;
+  y["adjust"]["p_u"] = 1.0;
+  const std::string yaml = testing::TempDir() + "/projected_reference.yaml";
+  std::ofstream(yaml) << y;
+  NeuPANPlanner planner = NeuPANPlanner::fromYaml(yaml, kModel);
+  planner.setInitialPath({{0, 0, 0, 1}, {20, 0, 0, 1}});
+  Vec3 s(0.15, 0.05, 0.0);
+  double worst = 0.0;
+  for (int k = 0; k < 30; ++k) {
+    NeuPANPlanner::Info info;
+    const Vec2 a = planner.forward(s, Mat2X(2, 0), info);
+    worst = std::max(worst, a.y());
+    s.head<2>() += planner.robot().dt * a;
+  }
+  return worst;
+}
+
+// Upstream's reference starts at the path point behind the robot, and the
+// plan swings across the path and back.
+TEST(Omni, ProjectedReferenceDoesNotOvershoot) {
+  EXPECT_GT(overshoot(false), 0.3);
+  EXPECT_LT(overshoot(true), 0.02);
 }

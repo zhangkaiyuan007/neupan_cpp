@@ -116,6 +116,8 @@ NeuPANPlanner NeuPANPlanner::fromYaml(const std::string& yaml_path,
     c.ipath.ind_range = ip["ind_range"].as<int>(c.ipath.ind_range);
     c.ipath.arrive_index_threshold =
         ip["arrive_index_threshold"].as<int>(c.ipath.arrive_index_threshold);
+    c.ipath.projected_reference =
+        ip["projected_reference"].as<bool>(c.ipath.projected_reference);
   }
 
   if (const auto p = y["pan"]) {

@@ -165,6 +165,7 @@ DUNE explicitly runs in **float32** to numerically align with PyTorch.
 **Differences from upstream:**
 
 * The node passes the action it sent last and the time since to the planner (`NeuPANPlanner::Command`); the first input differs from it by at most `max_acce` times that time. Upstream bounds only consecutive inputs within one plan, so every replan may jump anywhere in the speed box (straight to `ref_speed` from rest, a sudden turn when the path changes), more than a chassis can follow. Calling `forward` without a `Command` behaves as upstream, which is what the parity tests do.
+* `ipath.projected_reference: true` (default false, as upstream): the reference starts at the robot's projection on the path and steps `ref_speed` × `step_time` along it. Upstream starts at the first path point within `close_threshold`, often one behind the robot; with the speed cost on the magnitude only, not the direction, the plan swings side to side at full speed to fall back to it, and the robot weaves.
 
 **Roadmap:**
 
