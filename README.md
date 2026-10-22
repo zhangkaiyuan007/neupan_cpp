@@ -7,7 +7,7 @@ English version [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main
 (`libneupan`)和一个 ROS 2 节点(`neupan_cpp_ros`)。
 
 > 差速 (矩形机器人 + 全局路径参考) 已实现并在仿真中验证。
-> 全向已实现,与上游 Python 逐帧对齐,尚未上车验证。见 [项目状态与路线图](#项目状态与路线图)。
+> 全向已实现,与上游 Python 逐帧对齐,已在全向哨兵测试车上以 1.5 m/s 跑通。见 [项目状态与路线图](#项目状态与路线图)。
 
 <p align="center">
   <a href="https://b23.tv/tUGI5hV">
@@ -166,7 +166,7 @@ DUNE 特意用 **float32** 运行以在数值上对齐 PyTorch。
 - ROS 2(Humble)节点,话题与上游 `neupan_ros` 兼容
 - 一个参考全局规划器( A\* → `/initial_path`)
 
-**已实现,与上游 Python 对齐,未上车:**
+**已实现,与上游 Python 对齐,已在全向哨兵测试车上跑通(1.5 m/s):**
 - 全向(`omni`),凸多边形外形(`vertices`)。`/neupan_cmd_vel` 发 base 系下的
   `linear.x/y`。与上游的一处不同:静止或背离路径的 nominal 会沿路径重新初始化
   (见 `InitialPath::seedOmni`),否则从静止出发去身后的目标时上游会一直往前开
@@ -182,7 +182,7 @@ DUNE 特意用 **float32** 运行以在数值上对齐 PyTorch。
   规划就以满速左右摆来"退回"参考点,车会一左一右地走
 
 **路线图(TODO):**
-- [ ] 全向上车验证
+- [x] 全向上车验证
 - [ ] 阿克曼适配
 - [ ] 待定
 

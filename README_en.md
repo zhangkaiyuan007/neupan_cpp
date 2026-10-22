@@ -7,7 +7,7 @@ Original Chinese [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/mai
 This repo consists of a standalone core library (`libneupan`) and a ROS 2 node (`neupan_cpp_ros`).
 
 > Differential drive (rectangular robot + global path reference) has been implemented and validated in simulation.
-> Omnidirectional drive is implemented and matches upstream Python frame by frame, but has not been tested on a robot yet. See [Project Status and Roadmap](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md#project-status-and-roadmap).
+> Omnidirectional drive is implemented, matches upstream Python frame by frame, and runs on an omnidirectional sentry test car at 1.5 m/s. See [Project Status and Roadmap](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md#project-status-and-roadmap).
 
 <p align="center">
   <a href="https://b23.tv/tUGI5hV">
@@ -158,7 +158,7 @@ DUNE explicitly runs in **float32** to numerically align with PyTorch.
 * ROS 2 (Humble) node, topics compatible with upstream `neupan_ros`
 * A reference global planner (A* → `/initial_path`)
 
-**Implemented, matches upstream Python, not yet tested on a robot:**
+**Implemented, matches upstream Python, runs on an omnidirectional sentry test car (1.5 m/s):**
 
 * Omnidirectional drive (`omni`) with a convex polygon footprint (`vertices`). `/neupan_cmd_vel` carries `linear.x/y` in the base frame. One difference from upstream: a nominal that stands still or runs against the path is re-seeded along the path (see `InitialPath::seedOmni`); otherwise, starting from rest towards a goal behind it, upstream keeps driving forward.
 
@@ -169,7 +169,7 @@ DUNE explicitly runs in **float32** to numerically align with PyTorch.
 
 **Roadmap:**
 
-* [ ] Omnidirectional drive on a robot
+* [x] Omnidirectional drive on a robot
 * [ ] Ackermann adaptation
 * [ ] TBD
 
