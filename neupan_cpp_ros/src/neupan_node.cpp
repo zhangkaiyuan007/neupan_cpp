@@ -13,6 +13,7 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
+#include <Eigen/Geometry>
 #include <cmath>
 #include <memory>
 #include <optional>
@@ -25,6 +26,8 @@
 #include <nav_msgs/msg/path.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -107,6 +110,11 @@ class NeuPANNode : public rclcpp::Node {
         [this](sensor_msgs::msg::LaserScan::ConstSharedPtr msg) {
           scanCallback(*msg);
         });
+    cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+        "/points", rclcpp::SensorDataQoS(),
+        [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) {
+          cloudCallback(*msg);
+        });
     path_sub_ = create_subscription<nav_msgs::msg::Path>(
         "/initial_path", 10, [this](nav_msgs::msg::Path::ConstSharedPtr msg) {
           pathCallback(*msg);
@@ -131,10 +139,12 @@ class NeuPANNode : public rclcpp::Node {
 
  private:
   std::optional<neupan::Vec3> lookupPose(const std::string& target,
-                                         const std::string& source) {
+                                         const std::string& source,
+                                         rclcpp::Time* stamp = nullptr) {
     try {
       const auto tfs = tf_buffer_->lookupTransform(target, source,
                                                    tf2::TimePointZero);
+      if (stamp) *stamp = tfs.header.stamp;
       return neupan::Vec3(tfs.transform.translation.x,
                           tfs.transform.translation.y,
                           quatToYaw(tfs.transform.rotation));
@@ -149,12 +159,13 @@ class NeuPANNode : public rclcpp::Node {
   // Publishing nothing is not a stop: consumers hold the last command.
   void halt(const char* why) {
     vel_pub_->publish(geometry_msgs::msg::Twist());
+    plan_pub_->publish(matToPath(neupan::Mat3X(3, 0)));
     publishArrive(false);
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "%s", why);
   }
 
   void run() {
-    const auto state = lookupPose(map_frame_, base_frame_);
+    const auto state = lookupPose(map_frame_, base_frame_, &state_stamp_);
     if (!state) {
       halt("no robot pose (TF map->base), holding still");
       return;
@@ -197,7 +208,8 @@ class NeuPANNode : public rclcpp::Node {
                            info.min_distance, planner_->collisionThreshold());
 
     geometry_msgs::msg::Twist twist;
-    if (!info.stop && !info.arrive && !solverGaveUp(info)) {
+    const bool moving = !info.stop && !info.arrive && !solverGaveUp(info);
+    if (moving) {
       if (planner_->robot().kinematics == neupan::Kinematics::Omni) {
         // (vx, vy) in the map frame, turned into the base frame.
         const double c = std::cos(robot_state_(2));
@@ -212,7 +224,8 @@ class NeuPANNode : public rclcpp::Node {
     vel_pub_->publish(twist);
     publishArrive(info.arrive);
 
-    if (info.opt_s.cols() > 0) plan_pub_->publish(matToPath(info.opt_s));
+    // A follower may track the plan instead of the twist, so it is empty when stopped.
+    plan_pub_->publish(matToPath(moving ? info.opt_s : neupan::Mat3X(3, 0)));
     if (info.ref_s.cols() > 0) ref_state_pub_->publish(matToPath(info.ref_s));
     publishPointMarkers(info.dune_points, dune_markers_pub_, 160, 32, 240);
     publishPointMarkers(info.nrmp_points, nrmp_markers_pub_, 255, 128, 0);
@@ -287,6 +300,39 @@ class NeuPANNode : public rclcpp::Node {
       pts(0, i) = cy * xs[i] - sy * ys[i] + (*lidar_pose)(0);
       pts(1, i) = sy * xs[i] + cy * ys[i] + (*lidar_pose)(1);
     }
+    obstacle_points_ = std::move(pts);
+  }
+
+  // Obstacle points in any frame, e.g. a 3D lidar's already cut down to
+  // obstacles; z is dropped.
+  void cloudCallback(const sensor_msgs::msg::PointCloud2& msg) {
+    if (!have_state_) return;
+
+    geometry_msgs::msg::TransformStamped tfs;
+    try {
+      tfs = tf_buffer_->lookupTransform(map_frame_, msg.header.frame_id,
+                                        tf2::TimePointZero);
+    } catch (const tf2::TransformException& ex) {
+      RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+                           "waiting for tf %s -> %s: %s", map_frame_.c_str(),
+                           msg.header.frame_id.c_str(), ex.what());
+      return;
+    }
+    const auto& t = tfs.transform;
+    const Eigen::Isometry3d T =
+        Eigen::Translation3d(t.translation.x, t.translation.y, t.translation.z) *
+        Eigen::Quaterniond(t.rotation.w, t.rotation.x, t.rotation.y,
+                           t.rotation.z);
+
+    last_scan_time_ = now();
+    scan_seen_ = true;
+
+    neupan::Mat2X pts(2, msg.width * msg.height);
+    Eigen::Index n = 0;
+    sensor_msgs::PointCloud2ConstIterator<float> x(msg, "x"), y(msg, "y"),
+        z(msg, "z");
+    for (; x != x.end(); ++x, ++y, ++z)
+      pts.col(n++) = (T * Eigen::Vector3d(*x, *y, *z)).head<2>();
     obstacle_points_ = std::move(pts);
   }
 
@@ -370,13 +416,16 @@ class NeuPANNode : public rclcpp::Node {
     planner_->reset();
   }
 
+  // Stamped from the pose the plan starts at, one step_time per state.
   nav_msgs::msg::Path matToPath(const neupan::Mat3X& states) {
     nav_msgs::msg::Path path;
     path.header.frame_id = map_frame_;
-    path.header.stamp = now();
+    path.header.stamp = state_stamp_;
     for (Eigen::Index i = 0; i < states.cols(); ++i) {
       geometry_msgs::msg::PoseStamped ps;
       ps.header.frame_id = map_frame_;
+      ps.header.stamp =
+          state_stamp_ + rclcpp::Duration::from_seconds(i * planner_->robot().dt);
       ps.pose.position.x = states(0, i);
       ps.pose.position.y = states(1, i);
       ps.pose.orientation = yawToQuat(states(2, i));
@@ -474,6 +523,7 @@ class NeuPANNode : public rclcpp::Node {
   std::vector<neupan::InitialPath::PathPoint> last_waypoints_;
 
   neupan::Vec3 robot_state_ = neupan::Vec3::Zero();
+  rclcpp::Time state_stamp_{0, 0, RCL_ROS_TIME};
   bool have_state_ = false;
   neupan::Mat2X obstacle_points_ = neupan::Mat2X(2, 0);
 
@@ -490,6 +540,7 @@ class NeuPANNode : public rclcpp::Node {
       robot_marker_pub_;
 
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_,
       waypoints_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;

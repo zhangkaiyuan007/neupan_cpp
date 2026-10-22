@@ -75,12 +75,14 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | 方向 | 话题 | 类型 |
 |---|---|---|
 | 输入 | `/scan` | `sensor_msgs/LaserScan`(障碍点) |
+| 输入 | `/points` | `sensor_msgs/PointCloud2`(障碍点,任意坐标系,丢弃 z;与 `/scan` 二选一) |
 | 输入 | `/initial_path` | `nav_msgs/Path`(全局参考线) |
 | 输入 | `/neupan_goal` | `geometry_msgs/PoseStamped`(直线参考) |
 | 输入 | `/neupan_waypoints` | `nav_msgs/Path`(航点折线) |
 | 输出 | `/neupan_cmd_vel` | `geometry_msgs/Twist`,launch 里 remap 为 `/cmd_vel` |
 | 输出 | `/neupan_arrive` | `std_msgs/Bool`,每周期发布,到点后保持 true 直到换路径 |
-| 输出 | `/neupan_plan`、`/neupan_initial_path`、`/dune_point_markers` … | 可视化 |
+| 输出 | `/neupan_plan` | `nav_msgs/Path`,优化出的轨迹,时间戳从当前位姿起每个 `step_time` 一格,停车时为空,可直接给轨迹跟踪器 |
+| 输出 | `/neupan_initial_path`、`/dune_point_markers` … | 可视化 |
 
 规划器配置沿用 `planner.yaml` 的键名,支持 `kinematics: diff` 与 `omni`(外形可用 `vertices`
 给凸多边形),只支持 `curve_style: line`,

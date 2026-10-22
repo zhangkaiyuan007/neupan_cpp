@@ -72,12 +72,14 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | Direction | Topic                                                        | Type                                                  |
 | --------- | ------------------------------------------------------------ | ----------------------------------------------------- |
 | Input     | `/scan`                                                      | `sensor_msgs/LaserScan` (Obstacle points)             |
+| Input     | `/points`                                                    | `sensor_msgs/PointCloud2` (Obstacle points in any frame, z dropped; instead of `/scan`) |
 | Input     | `/initial_path`                                              | `nav_msgs/Path` (Global reference line)               |
 | Input     | `/neupan_goal`                                               | `geometry_msgs/PoseStamped` (Straight line reference) |
 | Input     | `/neupan_waypoints`                                          | `nav_msgs/Path` (Waypoint polyline)                   |
 | Output    | `/neupan_cmd_vel`                                            | `geometry_msgs/Twist`, remapped to `/cmd_vel` in the launch file |
 | Output    | `/neupan_arrive`                                             | `std_msgs/Bool`, published every cycle, stays true after arrival until the path is replaced |
-| Output    | `/neupan_plan`, `/neupan_initial_path`, `/dune_point_markers` … | Visualization                                         |
+| Output    | `/neupan_plan`                                               | `nav_msgs/Path`, the optimized trajectory, stamped from the current pose one `step_time` apart, empty when stopped; a trajectory tracker can follow it |
+| Output    | `/neupan_initial_path`, `/dune_point_markers` …              | Visualization                                         |
 
 The planner configuration keeps `planner.yaml`'s key names, supports `kinematics: diff` and `omni` (a convex polygon footprint can be given as `vertices`), only `curve_style: line` is supported, and `loop: true` is not ported. The combinations `d_min < 0`, `d_max < d_min`, `eta > 0` with `d_max <= 0`, and `collision_threshold <= 0` throw on load.
 
