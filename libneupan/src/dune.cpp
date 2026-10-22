@@ -13,7 +13,6 @@
 #include "neupan/dune.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -24,18 +23,10 @@ namespace neupan {
 
 namespace {
 
-// mu is only a valid distance for the (G, h) the network was trained against.
+// mu is only a valid distance for the (G, h) the network was trained against,
+// which tools/export_dune_weights.py stores in the file.
 void checkCheckpointGeometry(const std::string& path, const TensorFile& tf,
                              const Mat& G, const Vec& h) {
-  if (!tf.has("meta.G") || !tf.has("meta.h")) {
-    std::fprintf(stderr,
-                 "[neupan] WARNING: %s carries no footprint metadata, so it "
-                 "cannot be checked against the configured robot. Re-export "
-                 "with tools/export_dune_weights.py to enable the check.\n",
-                 path.c_str());
-    return;
-  }
-
   const Mat& mG = tf.at("meta.G");
   const Mat& mh = tf.at("meta.h");
   const bool shape_ok =

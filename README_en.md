@@ -77,14 +77,13 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | Input     | `/neupan_waypoints`                                          | `nav_msgs/Path` (Waypoint polyline)                   |
 | Output    | `/neupan_cmd_vel`                                            | `geometry_msgs/Twist`, remapped to `/cmd_vel` in the launch file |
 | Output    | `/neupan_arrive`                                             | `std_msgs/Bool`, published every cycle, stays true after arrival until the path is replaced |
-| Output    | `/neupan_diagnostics`                                        | `diagnostic_msgs/DiagnosticArray`, solve status, consecutive failures, min distance, stall flag |
 | Output    | `/neupan_plan`, `/neupan_initial_path`, `/dune_point_markers` … | Visualization                                         |
 
 The planner configuration keeps `planner.yaml`'s key names, supports `kinematics: diff` and `omni` (a convex polygon footprint can be given as `vertices`), only `curve_style: line` is supported, and `loop: true` is not ported. The combinations `d_min < 0`, `d_max < d_min`, `eta > 0` with `d_max <= 0`, and `collision_threshold <= 0` throw on load.
 
 Key tuning parameters: `collision_threshold` (hard emergency stop distance), `adjust.d_max` / `d_min` (how close it can get to obstacles), `ref_speed`, and `max_speed`.
 
-Node parameters: `config_file` and `dune_checkpoint` are required and throw when missing. `scan_timeout` defaults to 0.5 s, after which the obstacle points are cleared and the robot stops. `solver_fail_grace` defaults to 5 consecutive failed solves before stopping. `stall_speed` and `stall_timeout` default to 0.02 m/s and 3 s, and flag a stall.
+Node parameters: `config_file` and `dune_checkpoint` are required and throw when missing. `scan_timeout` defaults to 0.5 s, after which the obstacle points are cleared and the robot stops. `solver_fail_grace` defaults to 5 consecutive failed solves before stopping.
 
 ### Reference Global Planner (Optional)
 

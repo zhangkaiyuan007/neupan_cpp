@@ -80,7 +80,6 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 | 输入 | `/neupan_waypoints` | `nav_msgs/Path`(航点折线) |
 | 输出 | `/neupan_cmd_vel` | `geometry_msgs/Twist`,launch 里 remap 为 `/cmd_vel` |
 | 输出 | `/neupan_arrive` | `std_msgs/Bool`,每周期发布,到点后保持 true 直到换路径 |
-| 输出 | `/neupan_diagnostics` | `diagnostic_msgs/DiagnosticArray`,求解状态、连续失败次数、最小距离、卡死标志 |
 | 输出 | `/neupan_plan`、`/neupan_initial_path`、`/dune_point_markers` … | 可视化 |
 
 规划器配置沿用 `planner.yaml` 的键名,支持 `kinematics: diff` 与 `omni`(外形可用 `vertices`
@@ -92,7 +91,6 @@ ros2 launch neupan_cpp_ros neupan.launch.py
 
 节点参数:`config_file` 与 `dune_checkpoint` 必填,缺失即抛异常。`scan_timeout` 默认
 0.5 s,超时后清空障碍点并停车。`solver_fail_grace` 默认 5,连续求解失败超过此数即停车。
-`stall_speed` 与 `stall_timeout` 默认 0.02 m/s 与 3 s,用于判定卡死。
 
 ### 一个参考全局规划器(可选)
 

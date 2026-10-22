@@ -29,51 +29,33 @@ Robot makeRobot(const NeuPANPlanner::Config& c) {
                           c.max_acce, c.length, c.width, c.wheelbase);
 }
 
-// cfg_ is the first member, so this runs before the robot and the blocks.
-const NeuPANPlanner::Config& validated(const NeuPANPlanner::Config& c) {
-  NeuPANPlanner::validate(c);
-  return c;
-}
-
 }  // namespace
 
 void NeuPANPlanner::validate(const Config& c) {
-  const auto fail = [](const std::string& what) {
-    throw std::runtime_error("neupan config: " + what);
-  };
   const NRMPParams& a = c.adjust;
-
+  const char* bad = nullptr;
   if (c.receding < 1 || c.step_time <= 0.0)
-    fail("receding must be >= 1 and step_time > 0");
-
-  if (a.d_min < 0.0)
-    fail("d_min is negative (" + std::to_string(a.d_min) +
-         "); a negative clearance lets the plan penetrate obstacles");
-
-  if (a.d_max < a.d_min)
-    fail("d_max (" + std::to_string(a.d_max) + ") is below d_min (" +
-         std::to_string(a.d_min) + "), leaving the clearance box empty");
-
-  // Shipped as d = 0 with eta = 15 for a whole season, silently.
-  if (a.eta > 0.0 && a.d_max <= 0.0)
-    fail("eta > 0 rewards clearance but d_max is " + std::to_string(a.d_max) +
-         "; that pins the clearance variable to zero, so eta buys nothing and "
-         "only the ro_obs contact penalty repels obstacles (upstream uses "
-         "d_min 0.1, d_max 1.0)");
-
-  if (c.collision_threshold <= 0.0)
-    fail("collision_threshold is " + std::to_string(c.collision_threshold) +
-         "; stop would then require min_distance < 0, i.e. the footprint "
-         "already overlapping, which is unrecoverable");
+    bad = "receding must be >= 1 and step_time > 0";
+  else if (a.d_min < 0.0)
+    bad = "d_min < 0 lets the plan into obstacles";
+  else if (a.d_max < a.d_min)
+    bad = "d_max < d_min";
+  else if (a.eta > 0.0 && a.d_max <= 0.0)
+    bad = "d_max <= 0 pins the clearance to zero, so eta has no effect";
+  else if (c.collision_threshold <= 0.0)
+    bad = "collision_threshold must be > 0";
+  if (bad) throw std::runtime_error(std::string("neupan config: ") + bad);
 }
 
 NeuPANPlanner::NeuPANPlanner(const Config& config)
-    : cfg_(validated(config)),
+    : cfg_(config),
       robot_(makeRobot(config)),
       ipath_(robot_, config.ref_speed, config.ipath),
       pan_(robot_, config.dune_checkpoint, config.adjust, config.pan),
       ref_speed_(config.ref_speed),
-      cur_vel_array_(Mat2X::Zero(2, config.receding)) {}
+      cur_vel_array_(Mat2X::Zero(2, config.receding)) {
+  validate(config);
+}
 
 NeuPANPlanner NeuPANPlanner::fromYaml(const std::string& yaml_path,
                                       const std::string& checkpoint_override) {
@@ -198,7 +180,8 @@ Vec2 NeuPANPlanner::forward(const Vec3& state, const Mat2X& points,
     return Vec2::Zero();
   }
 
-  // it only bounds a command that a degraded solve might otherwise let slip through to the robot.
+  // An unsolved cycle returns the nominal, which the box does not bound (the
+  // omni nominal can be seeded at ref_speed).
   const Vec2 u = out.opt_u.col(0)
                      .cwiseMax(-robot_.max_speed)
                      .cwiseMin(robot_.max_speed);

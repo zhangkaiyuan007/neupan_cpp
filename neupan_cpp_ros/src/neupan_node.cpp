@@ -14,14 +14,12 @@
 #include <tf2_ros/transform_listener.h>
 
 #include <cmath>
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/path.hpp>
@@ -72,8 +70,6 @@ class NeuPANNode : public rclcpp::Node {
         declare_parameter<bool>("include_initial_path_direction", false);
     scan_timeout_ = declare_parameter<double>("scan_timeout", 0.5);
     solver_fail_grace_ = declare_parameter<int>("solver_fail_grace", 5);
-    stall_speed_ = declare_parameter<double>("stall_speed", 0.02);
-    stall_timeout_ = declare_parameter<double>("stall_timeout", 3.0);
     const double rate = declare_parameter<double>("control_rate", 50.0);
 
     if (scan_downsample_ < 1)
@@ -102,8 +98,6 @@ class NeuPANNode : public rclcpp::Node {
         create_publisher<visualization_msgs::msg::Marker>("/robot_marker", 10);
     // A decision layer may drive its chassis output off this, so publish every cycle.
     arrive_pub_ = create_publisher<std_msgs::msg::Bool>("/neupan_arrive", 10);
-    diag_pub_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
-        "/neupan_diagnostics", 10);
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
@@ -156,7 +150,6 @@ class NeuPANNode : public rclcpp::Node {
   void halt(const char* why) {
     vel_pub_->publish(geometry_msgs::msg::Twist());
     publishArrive(false);
-    publishStatus(diagnostic_msgs::msg::DiagnosticStatus::WARN, why, {});
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000, "%s", why);
   }
 
@@ -218,8 +211,6 @@ class NeuPANNode : public rclcpp::Node {
     }
     vel_pub_->publish(twist);
     publishArrive(info.arrive);
-    updateStall(twist, info.arrive);
-    publishDiagnostics(info, twist);
 
     if (info.opt_s.cols() > 0) plan_pub_->publish(matToPath(info.opt_s));
     if (info.ref_s.cols() > 0) ref_state_pub_->publish(matToPath(info.ref_s));
@@ -252,74 +243,6 @@ class NeuPANNode : public rclcpp::Node {
     std_msgs::msg::Bool msg;
     msg.data = arrived;
     arrive_pub_->publish(msg);
-  }
-
-  // Idling at the clearance in front of a blocked path sets neither stop nor arrive.
-  void updateStall(const geometry_msgs::msg::Twist& cmd, bool arrived) {
-    const bool moving =
-        std::hypot(cmd.linear.x, cmd.linear.y) > stall_speed_ ||
-        std::abs(cmd.angular.z) > stall_speed_;
-    // First planned cycle starts the clock; the zero epoch would flag instantly.
-    const bool first = last_progress_time_.nanoseconds() == 0;
-    if (moving || arrived || first) {
-      last_progress_time_ = now();
-      stalled_ = false;
-      return;
-    }
-    if ((now() - last_progress_time_).seconds() > stall_timeout_) {
-      stalled_ = true;
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-                           "stalled for %.1f s without arriving; the path may "
-                           "be blocked and need a global replan",
-                           stall_timeout_);
-    }
-  }
-
-  void publishStatus(
-      uint8_t level, const std::string& message,
-      const std::vector<std::pair<std::string, std::string>>& values) {
-    diagnostic_msgs::msg::DiagnosticStatus st;
-    st.name = "neupan";
-    st.hardware_id = base_frame_;
-    st.level = level;
-    st.message = message;
-    for (const auto& [k, v] : values) {
-      diagnostic_msgs::msg::KeyValue e;
-      e.key = k;
-      e.value = v;
-      st.values.push_back(e);
-    }
-    diagnostic_msgs::msg::DiagnosticArray arr;
-    arr.header.stamp = now();
-    arr.status.push_back(st);
-    diag_pub_->publish(arr);
-  }
-
-  void publishDiagnostics(const neupan::NeuPANPlanner::Info& info,
-                          const geometry_msgs::msg::Twist& cmd) {
-    using diagnostic_msgs::msg::DiagnosticStatus;
-    uint8_t level = DiagnosticStatus::OK;
-    std::string message = "tracking";
-    if (info.arrive) {  // arrival skips the solve, so check it first
-      message = "arrived";
-    } else if (stalled_ || consecutive_unsolved_ > solver_fail_grace_) {
-      level = DiagnosticStatus::ERROR;
-      message = stalled_ ? "stalled" : "solver failing";
-    } else if (info.stop || !info.solved) {
-      level = DiagnosticStatus::WARN;
-      message = info.stop ? "stopped at collision threshold" : "unsolved";
-    }
-
-    publishStatus(
-        level, message,
-        {{"solved", info.solved ? "true" : "false"},
-         {"solver_status", std::to_string(info.solver_status)},
-         {"consecutive_unsolved", std::to_string(consecutive_unsolved_)},
-         {"min_distance", std::to_string(info.min_distance)},
-         {"obstacle_points", std::to_string(obstacle_points_.cols())},
-         {"stalled", stalled_ ? "true" : "false"},
-         {"cmd_v", std::to_string(cmd.linear.x)},
-         {"cmd_w", std::to_string(cmd.angular.z)}});
   }
 
   void scanCallback(const sensor_msgs::msg::LaserScan& msg) {
@@ -542,13 +465,12 @@ class NeuPANNode : public rclcpp::Node {
   double scan_angle_min_, scan_angle_max_, scan_range_min_, scan_range_max_;
   int scan_downsample_;
   bool flip_angle_, include_initial_path_direction_;
-  double scan_timeout_, stall_speed_, stall_timeout_;
+  double scan_timeout_;
   int solver_fail_grace_;
 
   int consecutive_unsolved_ = 0;
-  bool scan_seen_ = false, stalled_ = false;
+  bool scan_seen_ = false;
   rclcpp::Time last_scan_time_{0, 0, RCL_ROS_TIME};
-  rclcpp::Time last_progress_time_{0, 0, RCL_ROS_TIME};
   std::vector<neupan::InitialPath::PathPoint> last_waypoints_;
 
   neupan::Vec3 robot_state_ = neupan::Vec3::Zero();
@@ -564,7 +486,6 @@ class NeuPANNode : public rclcpp::Node {
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       dune_markers_pub_, nrmp_markers_pub_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr arrive_pub_;
-  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diag_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
       robot_marker_pub_;
 

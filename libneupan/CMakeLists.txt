@@ -45,7 +45,7 @@ if(NEUPAN_BUILD_TESTS)
   enable_testing()
   find_package(GTest REQUIRED)
 
-  foreach(t test_dune test_nrmp test_replay test_omni)
+  foreach(t test_dune test_nrmp test_replay test_omni test_config)
     add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE neupan GTest::gtest GTest::gtest_main)
     target_compile_definitions(${t} PRIVATE
@@ -60,16 +60,6 @@ target_link_libraries(neupan_bench PRIVATE neupan)
 target_compile_definitions(neupan_bench PRIVATE
   NEUPAN_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
   NEUPAN_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
-
-add_executable(neupan_ab_safety_margin tools/ab_safety_margin.cpp)
-target_link_libraries(neupan_ab_safety_margin PRIVATE neupan)
-if(NEUPAN_BUILD_TESTS)
-  # Asserting tool: config A must be rejected, config B must keep passing.
-  add_test(NAME ab_safety_margin COMMAND neupan_ab_safety_margin
-    ${CMAKE_CURRENT_SOURCE_DIR}/tools/ab_configs/season_d0.yaml
-    ${CMAKE_CURRENT_SOURCE_DIR}/tools/ab_configs/upstream_margins.yaml
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/diff_sentry.bin)
-endif()
 
 install(TARGETS neupan EXPORT neupanTargets)
 install(DIRECTORY include/ DESTINATION include)
