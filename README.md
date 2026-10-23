@@ -1,3 +1,5 @@
+
+
 # neupan_cpp
 
 English version [Readme](https://github.com/zhangkaiyuan007/neupan_cpp/blob/main/README_en.md)
@@ -49,7 +51,7 @@ git clone https://github.com/gbionics/osqp-eigen.git
 cd osqp-eigen
 mkdir build
 cd build
-cmake ../
+cmake ..
 make
 sudo make install
 # 刷新动态库缓存，否则运行 neupan_node 时会找不到 libOsqpEigen.so
